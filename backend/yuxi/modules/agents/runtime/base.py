@@ -70,12 +70,6 @@ class BaseAgent(ABC):
                 for item in configurable_items.values():
                     if item.get("kind") in resource_options:
                         item["options"] = resource_options[item["kind"]]
-                if "space_slug" in configurable_items:
-                    from yuxi.modules.agents.services.spaces import list_spaces
-
-                    configurable_items["space_slug"]["options"] = [
-                        {"key": item["slug"], "name": f"{item['slug']}（{item['files']} 篇）"} for item in await list_spaces()
-                    ]
 
         # Merge metadata with class attributes, metadata takes precedence
         return {

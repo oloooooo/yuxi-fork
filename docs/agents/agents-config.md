@@ -126,5 +126,6 @@ class MyAgentContext(BaseContext):
 - [开发智能体后端](./agent-backend-development.md)
 - [中间件](./middleware.md)
 - [Skills 管理](./skills-management.md)
+- [业务空间](./business-spaces.md)
 - [会话协作](./session-cooperation.md)
 - [沙盒机制详解](../mechanisms/sandbox.md)

@@ -29,7 +29,6 @@ from deepagents.backends.utils import _get_file_type
 
 from yuxi.infrastructure.filesystem import await_io
 from yuxi.modules.agents.runtime.sandbox.provider import get_sandbox_provider
-from yuxi.modules.agents.runtime.sandbox.space_knowledge import SpaceKnowledgeBackend
 from yuxi.modules.workspace.runtime_files import MAX_FILE_BYTES, RuntimeFiles
 from yuxi.modules.workspace.runtime_paths import WORKSPACE_PATH, normalize_runtime_path, runtime_workdir_path
 
@@ -107,17 +106,13 @@ print(json.dumps({"matches":result[:limit],"truncated":len(result)>limit}))
 
 
 def create_agent_composite_backend(context) -> CompositeBackend:
-    """集中装配现有工具协议、当前 Project 的产物根和本 Agent 的空间知识只读视图。"""
+    """集中装配现有工具协议和当前 Project 的产物根。"""
     if not context.workdir_relative_path:
         raise ValueError("workdir_relative_path is required")
     workdir = runtime_workdir_path(context.workdir_relative_path)
-    routes = {}
-    if context.space_slug:
-        # 绑定到已发布的空间前缀；前缀为空时该目录为空列表，不影响其它路径。
-        routes["/spaces/"] = SpaceKnowledgeBackend(space_slug=context.space_slug)
     return CompositeBackend(
         default=UserSandboxBackend(uid=context.uid, workdir_path=context.workdir_relative_path),
-        routes=routes,
+        routes={},
         artifacts_root=f"{workdir}/outputs",
     )
 

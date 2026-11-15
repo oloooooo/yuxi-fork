@@ -68,6 +68,7 @@ export default defineConfig({
           { text: '工具系统', link: '/agents/tools-system' },
           { text: '中间件', link: '/agents/middleware' },
           { text: 'Skills 管理', link: '/agents/skills-management' },
+          { text: '业务空间', link: '/agents/business-spaces' },
           { text: 'MCP 集成', link: '/agents/mcp-integration' },
           { text: '会话协作', link: '/agents/session-cooperation' },
           { text: '智能体评估', link: '/agents/agent-evaluation' }

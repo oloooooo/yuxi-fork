@@ -1,6 +1,6 @@
 # 管理 Skills
 
-Skill 是一个可复用的能力包，通常包含一个 `SKILL.md`、提示词、参考资料和可选脚本。智能体先看到 Skill 的描述，再按需要读取 `SKILL.md`；本地工具和 MCP 依赖随 Skill 激活进入模型请求。
+Skill 是一个可复用的能力包，通常包含一个 `SKILL.md`、提示词、参考资料和可选脚本。智能体先看到 Skill 的描述，再按需要读取 `SKILL.md`；本地工具和 MCP 依赖随 Skill 激活进入模型请求。按部门共享的空间知识也以共享 Skill 承载，配置方式见[业务空间](./business-spaces.md)。
 
 ## 什么时候用 Skill
 

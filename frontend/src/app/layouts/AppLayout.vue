@@ -5,7 +5,6 @@ import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 import {
   BarChart3,
   ClipboardList,
-  FolderTree,
   LibraryBig,
   Box,
   HardDrive,
@@ -183,15 +182,6 @@ const mainList = computed(() => {
     icon: LibraryBig,
     activeIcon: LibraryBig
   })
-
-  if (userStore.isAdmin) {
-    items.push({
-      name: '业务空间',
-      path: '/spaces',
-      icon: FolderTree,
-      activeIcon: FolderTree
-    })
-  }
 
   if (userStore.isSuperAdmin) {
     items.push({

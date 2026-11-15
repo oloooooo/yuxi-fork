@@ -24,7 +24,6 @@ from yuxi.api.routers.knowledge.management import knowledge as knowledge_routes
 from yuxi.api.routers.models import model_providers
 from yuxi.api.routers.public_v1 import public_agents_router, public_knowledge_router
 from yuxi.api.routers.schedules import scheduled_agents
-from yuxi.api.routers.spaces import spaces
 from yuxi.api.routers.system import system as system_routes
 from yuxi.api.routers.workspace.projects import projects
 from yuxi.api.routers.workspace.viewer import filesystem_router
@@ -51,7 +50,6 @@ router.include_router(scheduled_agents)  # /api/scheduled-tasks* 用户自建 Ag
 router.include_router(dashboard_routes)  # /api/dashboard/* 仪表盘聚合数据
 router.include_router(department)  # /api/departments/* 部门与权限相关数据
 router.include_router(background_jobs)  # /api/background-jobs/* 后台作业查询与管理
-router.include_router(spaces)  # /api/spaces* 业务空间内容发布（管理员）
 router.include_router(mcp)  # /api/system/mcp-servers/* MCP 服务管理
 router.include_router(model_providers)  # /api/system/model-providers/* 独立模型配置
 router.include_router(skills)  # /api/system/skills/* Skills 管理
