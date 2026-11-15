@@ -1460,7 +1460,11 @@ async def test_init_builtin_skills_create_missing(tmp_path: Path, monkeypatch: p
     assert len(items) == 1
     assert items[0].slug == "reporter"
     assert FakeRepo.created_payload["source_type"] == "builtin"
-    assert FakeRepo.created_payload["share_config"] == builtin_service.BUILTIN_SKILL_SHARE_CONFIG
+    assert FakeRepo.created_payload["share_config"] == {
+        "version": 2,
+        "read_scope": skill_access.BUILTIN_SKILL_SHARE_CONFIG,
+        "manage_scope": None,
+    }
     assert FakeRepo.created_payload["enabled"] is True
     assert FakeRepo.created_payload["created_by"] == "system"
     assert FakeRepo.created_payload["tool_dependencies"] == ["mysql_query"]
@@ -1552,7 +1556,11 @@ async def test_init_builtin_skills_updates_existing_record_and_preserves_disable
         item.version = version
         item.content_hash = content_hash
         item.source_type = "builtin"
-        item.share_config = builtin_service.BUILTIN_SKILL_SHARE_CONFIG.copy()
+        item.share_config = {
+            "version": 2,
+            "read_scope": skill_access.BUILTIN_SKILL_SHARE_CONFIG.copy(),
+            "manage_scope": None,
+        }
         item.updated_by = updated_by
         captured["install"] = {"version": version, "content_hash": content_hash, "updated_by": updated_by}
         return item

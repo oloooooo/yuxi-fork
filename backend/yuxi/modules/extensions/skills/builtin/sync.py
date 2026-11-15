@@ -11,11 +11,9 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from yuxi.modules.extensions.skills.access import (
-    BUILTIN_SKILL_SHARE_CONFIG as BUILTIN_SKILL_SHARE_CONFIG,
-)
-from yuxi.modules.extensions.skills.access import (
     get_skills_root_dir,
     is_builtin_skill,
+    normalize_skill_share_config,
 )
 from yuxi.modules.extensions.skills.builtin import BUILTIN_SKILLS_DIR
 from yuxi.modules.extensions.skills.models import Skill
@@ -89,7 +87,7 @@ async def init_builtin_skills(db: AsyncSession, *, created_by: str = "system") -
                 mcp_dependencies=spec["mcp_dependencies"],
                 skill_dependencies=spec["skill_dependencies"],
                 dir_path=(Path("shared") / slug).as_posix(),
-                share_config=BUILTIN_SKILL_SHARE_CONFIG.copy(),
+                share_config=normalize_skill_share_config(None, operator_uid=created_by or BUILTIN_SKILL_OPERATOR, source_type="builtin"),
                 enabled=True,
                 version=spec["version"],
                 content_hash=spec["content_hash"],
