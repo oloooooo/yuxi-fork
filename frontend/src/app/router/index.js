@@ -96,6 +96,19 @@ const router = createRouter({
       ]
     },
     {
+      path: '/spaces',
+      name: 'spaces',
+      component: AppLayout,
+      children: [
+        {
+          path: '',
+          name: 'SpacesComp',
+          component: () => import('../../pages/SpacesView.vue'),
+          meta: { keepAlive: false, requiresAuth: true, requiresAdmin: true }
+        }
+      ]
+    },
+    {
       path: '/agent-manage',
       name: 'agent-manage',
       component: AppLayout,

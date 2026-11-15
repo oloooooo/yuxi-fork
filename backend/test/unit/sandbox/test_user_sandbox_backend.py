@@ -99,7 +99,12 @@ def test_artifact_must_be_workspace_regular_file(backend):
 
 def test_composite_keeps_artifacts_root_and_user_identity(backend):
     """Backend 装配仍向摘要和文件工具提供相同产物根。"""
-    context = SimpleNamespace(uid="one", runtime_scope_id="scope", workdir_relative_path="projects/11111111-1111-4111-8111-111111111111")
+    context = SimpleNamespace(
+        uid="one",
+        runtime_scope_id="scope",
+        space_slug=None,
+        workdir_relative_path="projects/11111111-1111-4111-8111-111111111111",
+    )
     result = create_agent_composite_backend(context)
     assert result.default.id == "one"
     assert result.artifacts_root == f"{WORKSPACE_PATH}/{context.workdir_relative_path}/outputs"

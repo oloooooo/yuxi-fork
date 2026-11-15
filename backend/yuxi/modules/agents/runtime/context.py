@@ -250,6 +250,15 @@ class BaseContext:
         },
     )
 
+    space_slug: str | None = field(
+        default=None,
+        metadata={
+            "name": "业务空间",
+            "type": "select",
+            "description": "选定后该智能体可通过 /spaces 只读浏览该空间的 Markdown；留空则不挂载。",
+        },
+    )
+
     mcps: ResourceSelection = field(
         default_factory=list,
         metadata={

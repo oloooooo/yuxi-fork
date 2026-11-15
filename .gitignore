@@ -68,4 +68,8 @@ cache
 frontend/package-lock.json
 docker/volumes
 docs/vibe
+# 本地代理工具的评审报告、任务日志与临时脚本
+/.pi/
 /backend/test/ci-reports/
+# 业务需求原件含内部信息，不入库；需长期引用时摘录进 docs/develop-guides/decisions/
+/Agent-PRD-*.md

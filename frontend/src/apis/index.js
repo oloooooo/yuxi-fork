@@ -19,6 +19,7 @@ export * from './auth_api' // 认证与用户管理 API
 export * from './project_api' // Project API
 export * from './scheduled_agent_api' // 用户 Agent 定时任务 API
 export * from './workspace_api' // Workspace API
+export * from './spaces_api' // 业务空间内容发布 API
 
 // 导出基础工具函数
 export {
