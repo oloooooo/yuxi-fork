@@ -251,6 +251,14 @@ if ($sandboxBackend -eq "container") {
     Remove-Variable runnerToken
 }
 
+# 受限网络部署：这些变量写进 .env，后续 compose 构建直接读取
+foreach ($mirrorName in @("APT_MIRROR", "PYPI_INDEX_URL", "YUXI_FRONTEND_BUILD_TARGET", "MINIO_BINARY_DIR")) {
+    $mirrorValue = [System.Environment]::GetEnvironmentVariable($mirrorName)
+    if (-not [string]::IsNullOrWhiteSpace($mirrorValue)) {
+        Set-EnvValue $mirrorName $mirrorValue
+    }
+}
+
 Write-Host ""
 Write-Host "Configure Search and Fetch after login in Settings -> 网络搜索." -ForegroundColor Blue
 Write-Host "📦 Pulling Docker images..." -ForegroundColor Cyan
@@ -279,7 +287,7 @@ foreach ($image in $images) {
 
     Write-Host "🔄 Pulling ${image}..." -ForegroundColor Yellow
     try {
-        & scripts/pull_image.ps1 $image
+        & scripts/pull_image_for_mirror.ps1 $image
         if ($LASTEXITCODE -eq 0) {
             Write-Host "✅ Successfully pulled ${image}" -ForegroundColor Green
         } else {
@@ -294,7 +302,11 @@ foreach ($image in $images) {
 
 # MinIO 官方镜像已全面下架，改为从仓库内 Dockerfile 构建
 Write-Host "🔄 Building minio and storage-init images..." -ForegroundColor Yellow
-docker compose build minio storage-init
+$mirrorArgs = @()
+if ($env:MINIO_BINARY_DIR -or (Get-ChildItem -Path "docker/minio/dist" -Filter "minio.linux-*" -ErrorAction SilentlyContinue)) {
+    $mirrorArgs = @("-f", "docker-compose.mirror.yml")
+}
+docker compose -f docker-compose.yml @mirrorArgs build minio storage-init
 if ($LASTEXITCODE -ne 0) {
     Write-Host "❌ Failed to build minio or storage-init image" -ForegroundColor Red
     exit 1

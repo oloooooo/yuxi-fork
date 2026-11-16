@@ -172,3 +172,16 @@ def test_minio_mirror_layer_skips_package_manager():
     assert "minio-binary" in minio["build"]["additional_contexts"]
     assert "context" not in minio["build"]
     assert minio["healthcheck"]["test"][1:3] == ["wget", "-q"]
+
+
+def test_init_scripts_use_mirror_scripts_and_params():
+    """初始化脚本必须接上镜像站脚本与构建参数，否则受限网络仍会走公共源。"""
+    init_sh = (project_root() / "scripts/init.sh").read_text(encoding="utf-8")
+    init_ps1 = (project_root() / "scripts/init.ps1").read_text(encoding="utf-8")
+
+    for text in (init_sh, init_ps1):
+        assert "scripts/pull_image_for_mirror" in text
+        assert "docker-compose.mirror.yml" in text
+    for name in ("APT_MIRROR", "PYPI_INDEX_URL", "YUXI_FRONTEND_BUILD_TARGET", "MINIO_BINARY_DIR"):
+        assert name in init_sh
+        assert name in init_ps1

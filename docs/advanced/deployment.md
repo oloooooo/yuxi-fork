@@ -29,25 +29,22 @@
 | 前端 | 宿主 `cd frontend && pnpm install --frozen-lockfile && pnpm run build`，再设 `YUXI_FRONTEND_BUILD_TARGET=prebuilt` | 只把 `frontend/dist` 打进 nginx 镜像，镜像内不执行 npm 或 pnpm。构建 `dist` 的宿主机要能装依赖，它走的是 npm 源（与 apt/PyPI 源无关），所以通常是在能联网的机器上构建好 `frontend/dist` 再拷入。开发 Compose 的 `development` 目标在镜像构建期就执行 npm，受限网络请用生产 Compose |
 | MinIO | 预下载 `minio.linux-<arch>.RELEASE.2024-12-18T13-15-44Z` 放到宿主目录，设 `MINIO_BINARY_DIR=<该目录>`，并叠加 `docker-compose.mirror.yml` | 叠层改用 `docker/minio/Dockerfile.mirror`：二进制经命名构建上下文 `minio-binary` COPY 进镜像，构建期不联网、不装包，仍校验 sha256。`MINIO_BINARY_DIR` 默认 `./docker/minio/dist` |
 
-按生产 Compose 的完整顺序（初始化脚本拉镜像走公共加速站并构建 minio，受限网络先跳过）：
+按生产 Compose 的完整顺序。`scripts/init.sh` 会读这几个变量：拉镜像改走 `YUXI_IMAGE_MIRROR`，把 `APT_MIRROR`、`PYPI_INDEX_URL`、`YUXI_FRONTEND_BUILD_TARGET`、`MINIO_BINARY_DIR` 写进 env 文件，并在 `MINIO_BINARY_DIR`（默认 `./docker/minio/dist`）找到二进制时构建 minio 自动叠加 `docker-compose.mirror.yml`：
 
 ```bash
+export YUXI_ENV=production
+export YUXI_ENV_FILE=.env.prod
 export YUXI_IMAGE_MIRROR=docker.example.internal
 export APT_MIRROR=mirrors.example.internal
 export PYPI_INDEX_URL=https://pypi.example.internal/simple
 export MINIO_BINARY_DIR=/data/packages/minio
 export YUXI_FRONTEND_BUILD_TARGET=prebuilt
-(cd frontend && pnpm build)
+(cd frontend && pnpm install --frozen-lockfile && pnpm run build)
 
-export YUXI_INIT_SKIP_IMAGES=1
 bash scripts/init.sh
 
-for image in alpine:3.20 python:3.13-slim node:24-slim node:22-alpine \
-             node:24-bullseye-slim \
-             milvusdb/milvus:v3.0.2 neo4j:5.26.29 ghcr.io/astral-sh/uv:0.12.6 \
-             nginx:alpine quay.io/coreos/etcd:v3.5.25 postgres:16 redis:7.4.10-alpine; do
-  bash scripts/pull_image_for_mirror.sh "$image"
-done
+# 镜像清单不含沙盒基础镜像，内网要单独补拉
+bash scripts/pull_image_for_mirror.sh node:24-bullseye-slim
 
 docker compose -f docker-compose.prod.yml -f docker-compose.mirror.yml --env-file .env.prod up -d --build
 ```

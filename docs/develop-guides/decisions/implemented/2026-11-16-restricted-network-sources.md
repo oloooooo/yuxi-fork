@@ -18,6 +18,7 @@ Owner：docker-compose.yml
 - 构建参数：`docker/api.Dockerfile` 增加 `ARG APT_MIRROR`（默认值等于原先硬编码的清华源）与 `ARG PYPI_INDEX_URL`（默认空）。`PYPI_INDEX_URL` 非空时先执行 `UV_DEFAULT_INDEX="$PYPI_INDEX_URL" uv lock --no-cache`，再执行原有的 `uv sync --frozen`；为空时行为与原先逐字节相同。`docker/sandbox.Dockerfile` 增加同名两个 `ARG`，apt 换源只在 `APT_MIRROR` 非空时执行，并同时改写 `debian.sources` 里的 `deb.debian.org` 与 `security.debian.org/debian-security` 两节；pip 索引只在该 RUN 内 `export PIP_INDEX_URL`，不写入运行期环境。
 - 前端：`docker/frontend.Dockerfile` 增加 `prebuilt` 阶段，只复制宿主机构建好的 `frontend/dist`，镜像内不执行 npm 或 pnpm。该阶段放在 `production` 之前，保证不带 `--target` 时默认目标仍是 `production`。切换方式是 compose 变量 `YUXI_FRONTEND_BUILD_TARGET`（默认 `production`），`.dockerignore` 相应不再忽略 `frontend/dist/`。
 - MinIO：新增 `docker/minio/Dockerfile.mirror` 与 `docker-compose.mirror.yml` 叠层。镜像副本不装任何包：使用者把 `minio.linux-<arch>.<版本>` 预上传到宿主目录，叠层通过 `additional_contexts: minio-binary` 把它作为命名构建上下文传入，Dockerfile 直接 `COPY` 并保留原有 sha256 校验；健康检查改用基础镜像自带的 busybox wget（不再安装 curl）。上游 `docker/minio/Dockerfile` 与两份 compose 的 minio 段不改。
+- 初始化脚本：`scripts/init.sh` 与 `scripts/init.ps1` 的拉镜像改调新增脚本，并把读到的 `APT_MIRROR`、`PYPI_INDEX_URL`、`YUXI_FRONTEND_BUILD_TARGET`、`MINIO_BINARY_DIR` 写进 env 文件；构建 minio 前若 `MINIO_BINARY_DIR` 已设置或 `docker/minio/dist` 里有二进制，就再叠加 `docker-compose.mirror.yml`。`scripts/pull_image.sh` 与 `scripts/pull_image.ps1` 本体不改。
 - 参数传递：两份 compose 用 `x-api-build` anchor 统一 api、worker、app-init、sandbox-runner 的 `build` 块并传入两个 `ARG`，`sandbox-image` 只在开发 compose 单独传参（生产沙盒镜像由宿主机预构建）。
 
 默认值全部等于改动前的行为：不设置任何变量时镜像内容、healthcheck 与拉取结果不变。
