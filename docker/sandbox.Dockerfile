@@ -8,7 +8,15 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1
 
-RUN apt-get update \
+# 受限网络的构建参数：APT_MIRROR 需同时提供 /debian 与 /debian-security 路径。
+# 留空时保留基础镜像自带的 Debian 官方源，PYPI_INDEX_URL 留空时 pip 使用官方索引。
+ARG APT_MIRROR=
+ARG PYPI_INDEX_URL=
+
+RUN set -eux \
+    # 仅在传入镜像源时改写；留空保留基础镜像自带的 Debian 官方源
+    && if [ -n "$APT_MIRROR" ]; then sed -i "s|deb.debian.org|$APT_MIRROR|g; s|security.debian.org/debian-security|$APT_MIRROR/debian-security|g" /etc/apt/sources.list.d/debian.sources; fi \
+    && apt-get update \
     && apt-get install -y --no-install-recommends \
         bash \
         ca-certificates \
@@ -38,7 +46,8 @@ RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
     && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
     && node --version && npm --version
 
-RUN pip install --no-cache-dir \
+RUN if [ -n "$PYPI_INDEX_URL" ]; then export PIP_INDEX_URL="$PYPI_INDEX_URL"; fi \
+    && pip install --no-cache-dir \
         beautifulsoup4 \
         httpx \
         openpyxl \

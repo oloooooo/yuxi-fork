@@ -17,6 +17,64 @@
 生产 Compose 自带的 Web 容器只监听 HTTP 80 端口，不负责证书和 HTTPS。把服务交给公网或接收登录、OIDC、API Key 请求前，必须在前面配置 TLS 反向代理，并只把 HTTPS 地址提供给用户和外部系统。HTTP 仅适合本机或受控内网调试。
 :::
 
+## 受限网络环境
+
+只有 Docker registry 镜像源、apt 源和 PyPI 源，没有直连 GitHub、Alpine CDN 或 npm 的网络时，按下表替换联网环节。不设置任何变量时行为与默认部署完全相同。
+
+| 环节 | 变量或命令 | 说明 |
+|---|---|---|
+| 拉取基础镜像 | `YUXI_IMAGE_MIRROR=<镜像源主机>` + `bash scripts/pull_image_for_mirror.sh <image>` | 前缀规则与 `scripts/pull_image.sh` 相同（0、1、多级路径分别补 `docker.io/library`、`docker.io`、仅主机），沿用 daocloud 这类代理式路径；自建 Harbor 的 project 式布局需自行调整前缀。镜像源缺该镜像时回落原仓库。带端口的主机（如 `harbor.internal:5000/app:1`）无法用代理式路径表达——Docker 引用的路径段不允许冒号，脚本会拼出非法引用并回落直连。这类仓库按仓库加速：containerd 在 `/etc/containerd/certs.d/harbor.internal:5000/hosts.toml` 里把镜像源作为 host（containerd 自动附 `?ns=`），或自建 pull-through 缓存后按缓存地址拉取；`daemon.json` 的 `registry-mirrors` 只对 Docker Hub 生效 |
+| api、worker、app-init、sandbox-runner | `APT_MIRROR=<apt 镜像站主机>`、`PYPI_INDEX_URL=<镜像站 simple 地址>` | 由 Compose build args 传入。`APT_MIRROR` 只填主机，镜像站需同时提供 `/debian` 与 `/debian-security` 路径；留空时等同改动前（api 用清华源，沙盒用 Debian 官方源） |
+| 生产沙盒镜像 | 宿主 `docker build -f docker/sandbox.Dockerfile --build-arg APT_MIRROR=… --build-arg PYPI_INDEX_URL=… -t <镜像> .` | 生产的 `sandbox-image` 没有 build 块（镜像预先构建并按 digest 固定），Compose 无法传参 |
+| 前端 | 宿主 `cd frontend && pnpm build`，再设 `YUXI_FRONTEND_BUILD_TARGET=prebuilt` | 只把 `frontend/dist` 打进 nginx 镜像，镜像内不执行 npm 或 pnpm。构建 `dist` 的宿主机需要能 `pnpm install`，否则在能联网的机器上构建好 `frontend/dist` 再拷入。开发 Compose 的 `development` 目标需要 npm，受限网络请用生产 Compose |
+| MinIO | 预下载 `minio.linux-<arch>.RELEASE.2024-12-18T13-15-44Z` 放到宿主目录，设 `MINIO_BINARY_DIR=<该目录>`，并叠加 `docker-compose.mirror.yml` | 叠层改用 `docker/minio/Dockerfile.mirror`：二进制经命名构建上下文 `minio-binary` COPY 进镜像，构建期不联网、不装包，仍校验 sha256。`MINIO_BINARY_DIR` 默认 `./docker/minio/dist` |
+
+按生产 Compose 的完整顺序（初始化脚本拉镜像走公共加速站并构建 minio，受限网络先跳过）：
+
+```bash
+export YUXI_IMAGE_MIRROR=docker.example.internal
+export APT_MIRROR=mirrors.example.internal
+export PYPI_INDEX_URL=https://pypi.example.internal/simple
+export MINIO_BINARY_DIR=/data/packages/minio
+export YUXI_FRONTEND_BUILD_TARGET=prebuilt
+(cd frontend && pnpm build)
+
+export YUXI_INIT_SKIP_IMAGES=1
+bash scripts/init.sh
+
+for image in alpine:3.20 python:3.13-slim node:24-slim node:22-alpine \
+             node:24-bullseye-slim \
+             milvusdb/milvus:v3.0.2 neo4j:5.26.29 ghcr.io/astral-sh/uv:0.12.6 \
+             nginx:alpine quay.io/coreos/etcd:v3.5.25 postgres:16 redis:7.4.10-alpine; do
+  bash scripts/pull_image_for_mirror.sh "$image"
+done
+
+docker compose -f docker-compose.prod.yml -f docker-compose.mirror.yml --env-file .env.prod up -d --build
+```
+
+Windows PowerShell 叠加多个 Compose 文件用分号：`$env:COMPOSE_FILE="docker-compose.yml;docker-compose.mirror.yml"`。显式 `-f` 会覆盖 `COMPOSE_FILE`，两者不要混用。
+Git Bash 会把传给容器的绝对路径参数改写成 Windows 路径（例如 `docker run --entrypoint /opt/bin/minio …` 报 `stat E:/tools/Git/opt/bin/minio`），这类命令前加 `MSYS_NO_PATHCONV=1`。
+
+### MinIO 二进制
+
+受限网络下 MinIO 不在构建期下载，二进制由人工上传。文件名必须是 `minio.linux-<TARGETARCH>.<MINIO_VERSION>`（本仓库当前为 `minio.linux-amd64.RELEASE.2024-12-18T13-15-44Z`），放在 `MINIO_BINARY_DIR` 指向的宿主目录，默认 `./docker/minio/dist`。官方地址模板是 `https://github.com/minio/minio/releases/download/<MINIO_VERSION>/<文件名>`，amd64 的 sha256 为 `88182336ab5793488f2caad54846056b330f0dcb5c488b60d52434beeebae3ca`，arm64 为 `455c9b3093b7c1e6153c85cfd745c7c401a92497346ba24dbe45775c7b3ab1cd`。`Dockerfile.mirror` 构建时会再校验一次，摘要不符直接失败。上传后先自检再构建：
+
+```bash
+sha256sum docker/minio/dist/minio.linux-amd64.RELEASE.2024-12-18T13-15-44Z
+docker compose -f docker-compose.prod.yml -f docker-compose.mirror.yml --env-file .env.prod build minio
+docker run --rm --entrypoint /opt/bin/minio yuxi-minio:RELEASE.2024-12-18T13-15-44Z --version
+```
+
+`PYPI_INDEX_URL` 会让 `docker/api.Dockerfile` 在安装前用该索引重新生成 `uv.lock`，镜像内版本可能因此偏离仓库锁文件。核对镜像里实际生效的锁文件：
+
+```bash
+docker run --rm --entrypoint cat <api 镜像> /app/uv.lock
+```
+
+内部索引需提供 HTTPS。只能走明文 HTTP 时构建参数不覆盖证书校验，需在 `docker/api.Dockerfile` 与 `docker/sandbox.Dockerfile` 对应的 `RUN` 内自行 `export UV_INSECURE_HOST=<主机>` 或 `export PIP_TRUSTED_HOST=<主机>` 后再构建。
+
+以下部分仍需外网或自建镜像：`mineru`（阿里云 pip 源与 ModelScope 权重）、`cube` 的 Playwright 与 VM 模板，以及 Skills 安装使用的 `npx -y`。这些镜像没有镜像源参数，只能预构建或经代理拉取。
+
 ## 1. 准备生产配置
 
 先按[下载代码](../intro/quick-start.md#_1-下载代码)获取 `v0.8.0` 源码，后续命令均在仓库根目录执行。该版本面向全新部署。
