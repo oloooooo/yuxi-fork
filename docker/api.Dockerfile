@@ -19,13 +19,18 @@ ENV TZ=Asia/Shanghai \
 RUN npm config set registry https://registry.npmmirror.com --global \
     && npm cache clean --force
 
+# 受限网络的构建参数：APT_MIRROR 填镜像站的主机（它需同时提供 /debian 与 /debian-security 路径）。
+# 留空时使用默认值，构建结果与改动前一致。
+ARG APT_MIRROR=
+
 # 设置代理和时区，更换镜像源，安装系统依赖 - 合并为一个RUN减少层数
 RUN set -ex \
+    && APT_MIRROR="${APT_MIRROR:-mirrors.tuna.tsinghua.edu.cn}" \
     # (A) 设置时区
     && ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone \
-    # (B) 替换清华源 (针对 Debian Bookworm 的新版格式)
-    && sed -i 's|deb.debian.org|mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list.d/debian.sources \
-    && sed -i 's|security.debian.org/debian-security|mirrors.tuna.tsinghua.edu.cn/debian-security|g' /etc/apt/sources.list.d/debian.sources \
+    # (B) 替换镜像源 (针对 Debian Bookworm 的新版格式)
+    && sed -i "s|deb.debian.org|$APT_MIRROR|g" /etc/apt/sources.list.d/debian.sources \
+    && sed -i "s|security.debian.org/debian-security|$APT_MIRROR/debian-security|g" /etc/apt/sources.list.d/debian.sources \
     # (C) 安装必要的系统库
     && apt-get update \
     && apt-get install -y --no-install-recommends --fix-missing \
@@ -57,8 +62,11 @@ COPY --chown=0:0 backend/yuxi /app/yuxi
 RUN find /app/yuxi -type d -exec chmod 0755 {} + \
     && find /app/yuxi -type f -exec chmod 0644 {} +
 
-# 依赖版本与发行文件下载地址由锁文件固定。
-RUN uv sync --no-cache --group test --no-dev --frozen
+# 依赖版本与发行文件下载地址由锁文件固定。受限网络可传 PYPI_INDEX_URL 指内网 PyPI 镜像：
+# 冻结安装直接消费锁定 URL，只有按该索引重新 lock 才会真正换源，镜像内会留下重解析后的 /app/uv.lock。
+ARG PYPI_INDEX_URL=
+RUN if [ -n "$PYPI_INDEX_URL" ]; then UV_DEFAULT_INDEX="$PYPI_INDEX_URL" uv lock --no-cache; fi \
+    && uv sync --no-cache --group test --no-dev --frozen
 
 COPY --chown=0:0 --chmod=0755 docker/api-entrypoint.sh /usr/local/bin/yuxi-entrypoint
 
