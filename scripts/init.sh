@@ -240,7 +240,8 @@ for name in SILICONFLOW_API_KEY WEB_SEARCH_PROVIDER DOUBAO_SEARCH_API_KEY TAVILY
     CUBE_NODE_USER_DATA_DIR CUBE_NODE_SKILL_PROJECTION_DIR \
     SANDBOX_BACKEND SANDBOX_RUNNER_TOKEN SANDBOX_RUNNER_URL SANDBOX_CONTAINER_IMAGE \
     SANDBOX_CONTAINER_IMAGE_DIGEST SANDBOX_CONTAINER_NETWORK SANDBOX_CONTAINER_UID SANDBOX_CONTAINER_GID \
-    COMPOSE_PROJECT_NAME YUXI_STATE_DIR YUXI_FRONTEND_PORT; do
+    COMPOSE_PROJECT_NAME YUXI_STATE_DIR YUXI_FRONTEND_PORT \
+    APT_MIRROR PYPI_INDEX_URL YUXI_FRONTEND_BUILD_TARGET MINIO_BINARY_DIR; do
     if [ "${!name+x}" = x ]; then
         case "$name" in
             JWT_SECRET_KEY|API_KEY_DERIVATION_SECRET)
@@ -348,7 +349,7 @@ for image in "${images[@]}"; do
     fi
 
     echo "🔄 Pulling ${image}..."
-    if bash scripts/pull_image.sh "$image"; then
+    if bash scripts/pull_image_for_mirror.sh "$image"; then
         echo "✅ Successfully pulled ${image}"
     else
         echo "❌ Failed to pull ${image}"
@@ -356,9 +357,14 @@ for image in "${images[@]}"; do
     fi
 done
 
-# MinIO 官方镜像已全面下架，改为从仓库内 Dockerfile 构建
+# MinIO 官方镜像已全面下架，改为从仓库内 Dockerfile 构建；
+# 内网部署把二进制预上传到 docker/minio/dist（或设 MINIO_BINARY_DIR）后改走镜像内二进制。
+mirror_flags=()
+if [ -n "${MINIO_BINARY_DIR:-}" ] || compgen -G "docker/minio/dist/*" >/dev/null; then
+    mirror_flags=(-f docker-compose.mirror.yml)
+fi
 echo "🔄 Building minio and storage-init images..."
-if YUXI_ENV_FILE="$env_file" docker compose --env-file "$env_file" -f "$compose_file" build minio storage-init; then
+if YUXI_ENV_FILE="$env_file" docker compose --env-file "$env_file" -f "$compose_file" ${mirror_flags[@]+"${mirror_flags[@]}"} build minio storage-init; then
     echo "✅ Successfully built minio and storage-init images"
 else
     echo "❌ Failed to build minio or storage-init image"
