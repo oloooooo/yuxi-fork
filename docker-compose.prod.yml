@@ -52,13 +52,19 @@ x-logging: &default-logging
     max-size: "50m"
     max-file: "3"
 
+# 受限网络可在构建时传入 APT_MIRROR、PYPI_INDEX_URL 改指内网源；留空时走镜像默认源。
+x-api-build: &api-build
+  context: .
+  dockerfile: docker/api.Dockerfile
+  args:
+    APT_MIRROR: ${APT_MIRROR:-}
+    PYPI_INDEX_URL: ${PYPI_INDEX_URL:-}
+
 services:
   api:
     ports:
       - "127.0.0.1:${YUXI_API_PORT:-6050}:5050"
-    build:
-      context: .
-      dockerfile: docker/api.Dockerfile
+    build: *api-build
     image: ${COMPOSE_PROJECT_NAME:-yuxi}-api:${YUXI_VERSION:-0.8.0}
     working_dir: /app
     user: "1000:1000"
@@ -105,9 +111,7 @@ services:
         condition: service_completed_successfully
 
   worker:
-    build:
-      context: .
-      dockerfile: docker/api.Dockerfile
+    build: *api-build
     image: ${COMPOSE_PROJECT_NAME:-yuxi}-api:${YUXI_VERSION:-0.8.0}
     working_dir: /app
     user: "1000:1000"
@@ -153,9 +157,7 @@ services:
         condition: service_completed_successfully
 
   app-init:
-    build:
-      context: .
-      dockerfile: docker/api.Dockerfile
+    build: *api-build
     image: ${COMPOSE_PROJECT_NAME:-yuxi}-api:${YUXI_VERSION:-0.8.0}
     working_dir: /app
     volumes:
@@ -185,9 +187,7 @@ services:
     restart: "no"
 
   sandbox-runner:
-    build:
-      context: .
-      dockerfile: docker/api.Dockerfile
+    build: *api-build
     image: ${COMPOSE_PROJECT_NAME:-yuxi}-api:${YUXI_VERSION:-0.8.0}
     working_dir: /app
     user: "0:0"
@@ -240,7 +240,7 @@ services:
     build:
       context: .
       dockerfile: docker/frontend.Dockerfile
-      target: production
+      target: ${YUXI_FRONTEND_BUILD_TARGET:-production}
     image: ${COMPOSE_PROJECT_NAME:-yuxi}-frontend:${YUXI_VERSION:-0.8.0}
     ports:
       - "${YUXI_FRONTEND_PORT:-80}:80"

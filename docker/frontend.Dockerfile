@@ -47,6 +47,18 @@ RUN find /app -path /app/node_modules -prune -o -type d -exec chmod 0755 {} + \
     && find /app -path /app/node_modules -prune -o -type f -exec chmod 0644 {} +
 RUN pnpm run build
 
+# 受限网络部署阶段：宿主机构建 frontend/dist 后只打包静态文件，镜像内不执行 npm/pnpm。
+# 构建：YUXI_FRONTEND_BUILD_TARGET=prebuilt docker compose -f docker-compose.prod.yml build frontend
+# 必须放在 production 之前：最后一个阶段是不带 --target 时的默认目标。
+FROM nginx:alpine AS prebuilt
+COPY --chown=0:0 ./frontend/dist /usr/share/nginx/html
+RUN find /usr/share/nginx/html -type d -exec chmod 755 {} \; \
+    && find /usr/share/nginx/html -type f -exec chmod 644 {} \;
+COPY --chown=0:0 --chmod=0644 ./docker/nginx/nginx.conf /etc/nginx/nginx.conf
+COPY --chown=0:0 --chmod=0644 ./docker/nginx/default.conf /etc/nginx/conf.d/default.conf
+EXPOSE 80
+CMD ["nginx", "-g", "daemon off;"]
+
 # 生产环境运行阶段
 FROM nginx:alpine AS production
 COPY --from=build-stage --chown=0:0 /app/dist /usr/share/nginx/html
