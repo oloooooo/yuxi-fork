@@ -26,7 +26,7 @@
 | 拉取基础镜像 | `YUXI_IMAGE_MIRROR=<镜像源主机>` + `bash scripts/pull_image_for_mirror.sh <image>` | 前缀规则与 `scripts/pull_image.sh` 相同（0、1、多级路径分别补 `docker.io/library`、`docker.io`、仅主机），沿用 daocloud 这类代理式路径；自建 Harbor 的 project 式布局需自行调整前缀。镜像源缺该镜像时回落原仓库。带端口的主机（如 `harbor.internal:5000/app:1`）无法用代理式路径表达——Docker 引用的路径段不允许冒号，脚本会拼出非法引用并回落直连。这类仓库按仓库加速：containerd 在 `/etc/containerd/certs.d/harbor.internal:5000/hosts.toml` 里把镜像源作为 host（containerd 自动附 `?ns=`），或自建 pull-through 缓存后按缓存地址拉取；`daemon.json` 的 `registry-mirrors` 只对 Docker Hub 生效 |
 | api、worker、app-init、sandbox-runner | `APT_MIRROR=<apt 镜像站主机>`、`PYPI_INDEX_URL=<镜像站 simple 地址>` | 由 Compose build args 传入。`APT_MIRROR` 只填主机，镜像站需同时提供 `/debian` 与 `/debian-security` 路径；留空时等同改动前（api 用清华源，沙盒用 Debian 官方源） |
 | 生产沙盒镜像 | 宿主 `docker build -f docker/sandbox.Dockerfile --build-arg APT_MIRROR=… --build-arg PYPI_INDEX_URL=… -t <镜像> .` | 生产的 `sandbox-image` 没有 build 块（镜像预先构建并按 digest 固定），Compose 无法传参 |
-| 前端 | 宿主 `cd frontend && pnpm build`，再设 `YUXI_FRONTEND_BUILD_TARGET=prebuilt` | 只把 `frontend/dist` 打进 nginx 镜像，镜像内不执行 npm 或 pnpm。构建 `dist` 的宿主机需要能 `pnpm install`，否则在能联网的机器上构建好 `frontend/dist` 再拷入。开发 Compose 的 `development` 目标需要 npm，受限网络请用生产 Compose |
+| 前端 | 宿主 `cd frontend && pnpm install --frozen-lockfile && pnpm run build`，再设 `YUXI_FRONTEND_BUILD_TARGET=prebuilt` | 只把 `frontend/dist` 打进 nginx 镜像，镜像内不执行 npm 或 pnpm。构建 `dist` 的宿主机要能装依赖，它走的是 npm 源（与 apt/PyPI 源无关），所以通常是在能联网的机器上构建好 `frontend/dist` 再拷入。开发 Compose 的 `development` 目标在镜像构建期就执行 npm，受限网络请用生产 Compose |
 | MinIO | 预下载 `minio.linux-<arch>.RELEASE.2024-12-18T13-15-44Z` 放到宿主目录，设 `MINIO_BINARY_DIR=<该目录>`，并叠加 `docker-compose.mirror.yml` | 叠层改用 `docker/minio/Dockerfile.mirror`：二进制经命名构建上下文 `minio-binary` COPY 进镜像，构建期不联网、不装包，仍校验 sha256。`MINIO_BINARY_DIR` 默认 `./docker/minio/dist` |
 
 按生产 Compose 的完整顺序（初始化脚本拉镜像走公共加速站并构建 minio，受限网络先跳过）：
@@ -64,6 +64,8 @@ sha256sum docker/minio/dist/minio.linux-amd64.RELEASE.2024-12-18T13-15-44Z
 docker compose -f docker-compose.prod.yml -f docker-compose.mirror.yml --env-file .env.prod build minio
 docker run --rm --entrypoint /opt/bin/minio yuxi-minio:RELEASE.2024-12-18T13-15-44Z --version
 ```
+
+构建和启动都必须叠加 `docker-compose.mirror.yml`。`docker-compose.yml` 的 minio healthcheck 调用 `curl`，而 `Dockerfile.mirror` 镜像里没有 curl；只用一个文件构建并启动，minio 会一直 `unhealthy`，依赖它的服务全部起不来。
 
 `PYPI_INDEX_URL` 会让 `docker/api.Dockerfile` 在安装前用该索引重新生成 `uv.lock`，镜像内版本可能因此偏离仓库锁文件。核对镜像里实际生效的锁文件：
 
@@ -247,7 +249,7 @@ curl --fail http://localhost/api/system/ready
 
 worker 的 Compose 健康检查通过 `python -m yuxi.workers.health` 轻量读取 `REDIS_URL` 中的 ARQ 心跳，不加载业务执行依赖。心跳缺失、过期、没有 TTL、TTL 超过约定上界或 Redis 连接失败时检查失败。该心跳表达共享队列的消费健康，多副本部署不能用它判断单个 worker 进程是否失活。
 
-就绪接口返回 `ready` 后，再用浏览器完成登录和一次真实对话。健康或就绪状态不能证明知识库、模型、沙盒或外部服务的业务链路正确。
+就绪接口返回 `ready` 后，再用浏览器完成登录和一次真实对话。健康或就绪状态不能证明知识库、模型、沙盒或外部服务的业务链路正确。全新数据库不会启用任何聊天模型，首次对话会返回 `chat_model_not_found`，要先在系统设置里给供应商启用模型并保存。
 
 公开头像和智能体图片通过同源 `/minio/public/...` 只读代理访问。不要把 MinIO 的 9000 对象 API 或 9001 控制台暴露到公网；知识库等私有 bucket 不经过该代理。需要单独的静态资源域名时，设置 `MINIO_PUBLIC_URL`，并在域名侧保持同样的只读限制。
 
