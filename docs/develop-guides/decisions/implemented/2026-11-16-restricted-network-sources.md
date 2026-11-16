@@ -41,5 +41,7 @@ Owner：docker-compose.yml
 - `docker compose -f <prod 或 dev> -f docker-compose.mirror.yml config` 解析出的 minio `build.context` 仍为 `./docker/minio`，`build.dockerfile` 为 `Dockerfile.mirror`，`additional_contexts` 指向 `MINIO_BINARY_DIR`，healthcheck 为 wget。
 - `backend/test/unit/config/test_mirror_sources.py` 用假 docker 记录实际 pull 的仓库串，覆盖默认 host、尾斜杠、单级与多级路径补全，以及镜像源失败后回落原仓库；并对两份 compose、四个 build 块、`sandbox-image`、frontend target、Dockerfile 默认值、沙盒两节 apt 换源与 `.dockerignore` 做静态断言。
 - 容器内完整 `pytest test/unit -m "not slow"`：3896 passed / 12 skipped / 1 failed。失败项 `test_python_package_sources.py` 的官方源守卫由“在只读挂载的临时副本里按镜像索引重新 lock”触发，仓库 `backend/uv.lock` 未被修改。`scripts/ci/verify_engineering_contracts.py` 与其 56 个 unittest 通过。
-- 真实构建验证：`sandbox-image`（apt 与 pip 均走镜像站，镜像内 `PIP_INDEX_URL` 未固化）、api 镜像（镜像内 `/app/uv.lock` 全部指向镜像站、`files.pythonhosted.org` 为 0）、前端 `--target prebuilt`（镜像内无 npm 或 pnpm）、minio 叠层（预上传二进制，healthcheck 报 healthy）。
-- 未验证：`scripts/pull_image_for_mirror.ps1` 未在 PowerShell 下执行，只按 sh 版本对照审查；Windows 宿主上的 `pnpm build` 与 `MSYS_NO_PATHCONV` 提示未实测。
+- 真实构建验证：`sandbox-image`（apt 与 pip 均走镜像站，镜像内 `PIP_INDEX_URL` 未固化）、api 镜像（镜像内 `/app/uv.lock` 全部指向镜像站、`files.pythonhosted.org` 为 0）、minio 叠层（预上传二进制，healthcheck 报 healthy）。
+- 端到端：清空容器与卷后全量重建，`/api/system/ready` 全项 ok；登录后经公开 API 完成一次真实对话（Turn `completed`，助手正文落库）；宿主机 `pnpm install --frozen-lockfile && pnpm run build` 产出的真实 `frontend/dist` 打成 `--target prebuilt` 镜像后，用浏览器登录并发消息，页面渲染出助手回复。
+- 验证中发现：只叠加 `docker-compose.yml` 启动会因 minio healthcheck 使用 `curl`（`Dockerfile.mirror` 镜像不含 curl）而卡在 `unhealthy`，两个文件必须一起用，已在部署文档写明。
+- 未验证：`scripts/pull_image_for_mirror.ps1` 未在 PowerShell 下执行，只按 sh 版本对照审查；基础镜像只用镜像源重拉过 `alpine:3.20` 一个，其余靠本地层缓存。
