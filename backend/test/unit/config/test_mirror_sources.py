@@ -38,6 +38,41 @@ esac
     )
 
 
+def _run_nexus_pull(tmp_path: Path, image: str, fail_glob: str = "*") -> tuple[subprocess.CompletedProcess, list[str]]:
+    """用假 docker 运行 Nexus 拉取脚本，返回执行结果与实际尝试过的引用列表。"""
+    docker = tmp_path / "docker"
+    docker.write_text(
+        """#!/bin/bash
+set -e
+case "$1" in
+    pull)
+        echo "$2" >> "$IMAGE_STATE/attempts"
+        [[ $2 == $IMAGE_STATE_FAIL_GLOB ]] && exit 1
+        echo digest > "$IMAGE_STATE/source" ;;
+    tag) cp "$IMAGE_STATE/source" "$IMAGE_STATE/original" ;;
+    rmi) rm "$IMAGE_STATE/source" ;;
+esac
+"""
+    )
+    docker.chmod(0o700)
+    env = {
+        **os.environ,
+        "PATH": f"{tmp_path}{os.pathsep}{os.environ['PATH']}",
+        "IMAGE_STATE": str(tmp_path),
+        "IMAGE_STATE_FAIL_GLOB": fail_glob,
+    }
+    env.pop("YUXI_NEXUS_REGISTRY", None)
+    env.pop("YUXI_IMAGE_MIRROR", None)
+    result = subprocess.run(
+        ["bash", str(project_root() / "scripts/pull_image_from_nexus.sh"), image],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    attempts_file = tmp_path / "attempts"
+    return result, attempts_file.read_text().split() if attempts_file.exists() else []
+
+
 @pytest.mark.parametrize(
     "image,mirror,pulled",
     [
@@ -120,13 +155,53 @@ def test_prod_frontend_target_switches_to_prebuilt_image():
     assert build["target"] == "${YUXI_FRONTEND_BUILD_TARGET:-production}"
 
 
+def test_dev_frontend_serves_container_port_80_without_command_override():
+    """dev 栈前端也由镜像内的 nginx 服务（受限网络用 prebuilt），compose 不再指定 vite 启动命令。"""
+    frontend = load_compose("docker-compose.yml")["services"]["frontend"]
+
+    assert "command" not in frontend
+    assert frontend["ports"] == ["${YUXI_FRONTEND_PORT:-5173}:80"]
+
+
+def test_mirror_layer_defaults_frontend_to_prebuilt():
+    """堆上受限网络叠层后，前端默认只打包宿主机 dist，不依赖镜像内 npm。"""
+    build = load_compose("docker-compose.mirror.yml")["services"]["frontend"]["build"]
+
+    assert build["dockerfile"] == "docker/frontend.Dockerfile"
+    assert build["target"] == "${YUXI_FRONTEND_BUILD_TARGET:-prebuilt}"
+
+
+def test_nexus_pull_script_tries_repository_paths_before_proxy(tmp_path: Path):
+    """Nexus 的主机带端口，只能用路径候选重试：先去前缀，再回落代理式镜像源。"""
+    result, attempts = _run_nexus_pull(tmp_path, "python:3.13-slim", fail_glob="*library*")
+
+    assert result.returncode == 0
+    assert attempts == [
+        "nexus.devops.abcd.com:8443/library/python:3.13-slim",
+        "nexus.devops.abcd.com:8443/python:3.13-slim",
+    ]
+
+
+def test_nexus_pull_script_falls_back_to_proxy_then_original_registry(tmp_path: Path):
+    """所有加速路径都失败时直连原仓库；再失败脚本必须返回非零。"""
+    result, attempts = _run_nexus_pull(tmp_path, "quay.io/coreos/etcd:v3.5.25")
+
+    assert result.returncode != 0
+    assert attempts == [
+        "nexus.devops.abcd.com:8443/coreos/etcd:v3.5.25",
+        "nexus.devops.abcd.com:8443/quay.io/coreos/etcd:v3.5.25",
+        "m.daocloud.io/quay.io/coreos/etcd:v3.5.25",
+        "quay.io/coreos/etcd:v3.5.25",
+    ]
+
+
 def test_api_dockerfile_keeps_current_sources_when_args_empty():
     """构建参数留空时 apt 与 pip 行为与改动前一致。"""
     dockerfile = (project_root() / "docker/api.Dockerfile").read_text(encoding="utf-8")
 
     assert 'APT_MIRROR="${APT_MIRROR:-mirrors.tuna.tsinghua.edu.cn}"' in dockerfile
     assert "uv sync --no-cache --group test --no-dev --frozen" in dockerfile
-    assert 'if [ -n "$PYPI_INDEX_URL" ]; then UV_DEFAULT_INDEX="$PYPI_INDEX_URL" uv lock --no-cache; fi' in dockerfile
+    assert 'if [ -n "$PYPI_INDEX_URL" ]; then export UV_DEFAULT_INDEX="$PYPI_INDEX_URL"; uv lock --no-cache; fi' in dockerfile
 
 
 def test_sandbox_dockerfile_overrides_both_debian_source_sections():
@@ -179,8 +254,10 @@ def test_init_scripts_use_mirror_scripts_and_params():
     init_sh = (project_root() / "scripts/init.sh").read_text(encoding="utf-8")
     init_ps1 = (project_root() / "scripts/init.ps1").read_text(encoding="utf-8")
 
+    # bash 走带端口的私有仓库脚本（内部依次回落代理镜像与直连），PowerShell 仍用代理式镜像脚本。
+    assert "scripts/pull_image_from_nexus" in init_sh
+    assert "scripts/pull_image_for_mirror" in init_ps1
     for text in (init_sh, init_ps1):
-        assert "scripts/pull_image_for_mirror" in text
         assert "docker-compose.mirror.yml" in text
     for name in ("APT_MIRROR", "PYPI_INDEX_URL", "YUXI_FRONTEND_BUILD_TARGET", "MINIO_BINARY_DIR"):
         assert name in init_sh
