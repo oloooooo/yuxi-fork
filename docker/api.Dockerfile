@@ -65,7 +65,7 @@ RUN find /app/yuxi -type d -exec chmod 0755 {} + \
 # 依赖版本与发行文件下载地址由锁文件固定。受限网络可传 PYPI_INDEX_URL 指内网 PyPI 镜像：
 # 冻结安装直接消费锁定 URL，只有按该索引重新 lock 才会真正换源，镜像内会留下重解析后的 /app/uv.lock。
 ARG PYPI_INDEX_URL=
-RUN if [ -n "$PYPI_INDEX_URL" ]; then UV_DEFAULT_INDEX="$PYPI_INDEX_URL" uv lock --no-cache; fi \
+RUN if [ -n "$PYPI_INDEX_URL" ]; then export UV_DEFAULT_INDEX="$PYPI_INDEX_URL"; uv lock --no-cache; fi \
     && uv sync --no-cache --group test --no-dev --frozen
 
 COPY --chown=0:0 --chmod=0755 docker/api-entrypoint.sh /usr/local/bin/yuxi-entrypoint

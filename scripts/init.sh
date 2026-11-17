@@ -349,7 +349,7 @@ for image in "${images[@]}"; do
     fi
 
     echo "🔄 Pulling ${image}..."
-    if bash scripts/pull_image_for_mirror.sh "$image"; then
+    if bash scripts/pull_image_from_nexus.sh "$image"; then
         echo "✅ Successfully pulled ${image}"
     else
         echo "❌ Failed to pull ${image}"
