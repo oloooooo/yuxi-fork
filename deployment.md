@@ -93,7 +93,8 @@ TZ=Asia/Shanghai
 | `APT_MIRROR` | api / sandbox 镜像的 Debian 源 | 只填主机名，如 `mirrors.tuna.tsinghua.edu.cn`；该主机必须同时提供 `/debian` 与 `/debian-security` |
 | `PYPI_INDEX_URL` | Python 包索引 | 必须带协议的完整索引地址，如 `https://mirrors.tuna.tsinghua.edu.cn/simple`；只写域名或 `host/simple` 不合法。非空时 api 镜像在构建期按该索引重新 `uv lock`，之后的 `uv sync --frozen` 走新锁 |
 | `YUXI_IMAGE_MIRROR` | 拉基础镜像的前缀式镜像源 | 默认 `m.daocloud.io`；用法 `YUXI_IMAGE_MIRROR=<host> bash scripts/pull_image_for_mirror.sh <image>`，缺镜像时回落原仓库 |
-| `YUXI_FRONTEND_BUILD_TARGET` | 前端构建方式 | `prebuilt` = 不跑 npm，直接打包宿主 `frontend/dist`（生产 Compose 生效） |
+| `YUXI_NEXUS_REGISTRY` | 带端口的私有仓库（Nexus） | 默认 `nexus.devops.abcd.com:8443`；用法 `YUXI_NEXUS_REGISTRY=<host:port> bash scripts/pull_image_from_nexus.sh <image>`，依次尝试 Nexus 候选路径、代理式镜像源与原仓库。`scripts/init.sh` 用它拉镜像 |
+| `YUXI_FRONTEND_BUILD_TARGET` | 前端构建方式 | `prebuilt` = 不跑 npm，直接打包宿主 `frontend/dist`（生产 Compose 生效）。切换后必须重建前端镜像，复用旧的 `development` 镜像会因镜像内没有启动命令而反复重启 |
 | `MINIO_BINARY_DIR` | MinIO 二进制所在目录 | 与 `docker-compose.mirror.yml` 叠加使用，默认 `./docker/minio/dist` |
 
 需要提前知道的三件事：

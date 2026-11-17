@@ -15,3 +15,9 @@ services:
         minio-binary: ${MINIO_BINARY_DIR:-./docker/minio/dist}
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:9000/minio/health/live"]
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend.Dockerfile
+      # 只用宿主机构建好的 frontend/dist，受限网络无法在镜像内跑 npm
+      target: ${YUXI_FRONTEND_BUILD_TARGET:-prebuilt}
