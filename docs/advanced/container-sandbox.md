@@ -66,7 +66,7 @@ runner 直接运行在宿主机（不在 Compose 内）时，需要把 `SANDBOX_
 
 runner 从自身容器的 `/sandbox-data`、`/sandbox-skill-projections` 挂载反查 Docker daemon 视角的宿主路径；API/worker 不传宿主路径，模型也不能选择挂载。Workdir 与个人 Skill 目录逐段以 `O_NOFOLLOW` 打开，拒绝 `..`、符号链接、非目录和越界。Skill 投影不存在时跳过该挂载，不创建空宿主目录。
 
-容器固定以 `SANDBOX_CONTAINER_UID:GID`（默认 1000:1000）运行；宿主 Workspace 和 Skill 投影必须允许该身份读写/读取。镜像由 [docker/sandbox.Dockerfile](https://github.com/xerrors/Yuxi/blob/main/docker/sandbox.Dockerfile) 构建，包含 Node 24、npm/npx、bash、python3、pip、uv、git、curl、jq、ripgrep、unzip 和常用 Python 库。镜像不包含 sudo，且 root 文件系统只读。
+容器固定以 `SANDBOX_CONTAINER_UID:GID`（默认 1000:1000）运行；宿主 Workspace 和 Skill 投影必须允许该身份读写/读取。镜像由 [docker/sandbox.Dockerfile](https://github.com/xerrors/Yuxi/blob/main/docker/sandbox.Dockerfile) 构建，包含 Node 24、npm/npx、bash、python3、pip、uv、git、curl、jq、ripgrep、unzip，以及 pandas、pyarrow、openpyxl 等常用 Python 库。镜像不包含 sudo，且 root 文件系统只读。
 
 ## 资源与网络
 

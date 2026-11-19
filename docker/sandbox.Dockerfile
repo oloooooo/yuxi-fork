@@ -51,7 +51,9 @@ RUN if [ -n "$PYPI_INDEX_URL" ]; then export PIP_INDEX_URL="$PYPI_INDEX_URL"; fi
         beautifulsoup4 \
         httpx \
         openpyxl \
+        pandas \
         pillow \
+        pyarrow \
         pymysql \
         requests
 
