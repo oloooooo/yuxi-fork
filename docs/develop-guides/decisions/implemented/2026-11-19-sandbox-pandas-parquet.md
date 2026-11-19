@@ -36,5 +36,5 @@ Owner：docker/sandbox.Dockerfile
 
 - 构建：`docker compose --profile container build sandbox-image` 成功，`yuxi-sandbox:0.8.0` 镜像 ID 为 `sha256:9332fd61328bf78a01956e010d858480c2af8ea646eaa312c596d32adb3ee8af`。
 - 容器内事实：`pandas 3.1.1`（`Requires: numpy, python-dateutil`）、`pyarrow 26.0.1`、`openpyxl` 可导入。
-- 真实链路（默认 agent `default-chatbot`，`yuxi_client.py` 上传两个附件，模型 `siliconflow-cn:deepseek-ai/DeepSeek-V4.1-Flash`，三次 `execute` 审批均显式批准）：`demo_sales.xlsx` 明细表 4 行、销售额合计 54000，汇总表 3 行、合计 54000；`demo_orders.parquet` 8 行、金额合计 2818.0。Turn 终态 `completed`，输出来自顶层 Run。
+- 真实链路（默认 agent `default-chatbot`，`scripts/demo/yuxi_client.py` 上传两个附件，模型 `siliconflow-cn:deepseek-ai/DeepSeek-V4.1-Flash`，三次 `execute` 审批均显式批准）：`demo_sales.xlsx` 明细表 4 行、销售额合计 54000，汇总表 3 行、合计 54000；`demo_orders.parquet` 8 行、金额合计 2818.0。Turn 终态 `completed`，输出来自顶层 Run。
 - 未验证范围：容器沙盒 Docker 集成测试（`SANDBOX_CONTAINER_TEST=1`）未在本机重跑；改动不触及 runner 代码，只改变镜像内容。
