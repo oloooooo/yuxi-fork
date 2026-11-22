@@ -147,7 +147,8 @@ import CollapseTransition from '@/shared/ui/CollapseTransition.vue'
 const props = defineProps({
   open: { type: Boolean, default: false },
   editMode: { type: Boolean, default: false },
-  editData: { type: Object, default: null }
+  editData: { type: Object, default: null },
+  initialData: { type: Object, default: null }
 })
 
 const emit = defineEmits(['update:open', 'submitted'])
@@ -211,7 +212,7 @@ watch(
         sse_read_timeout: props.editData.sse_read_timeout,
       })
     } else if (val && !props.editData) {
-      Object.assign(form, createEmptyForm())
+      Object.assign(form, createEmptyForm(), props.initialData ? { slug: props.initialData.slug, name: props.initialData.name } : {})
     }
   },
   { immediate: true }

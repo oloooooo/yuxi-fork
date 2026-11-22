@@ -186,6 +186,10 @@
             >
           </div>
           <StatusItemList :items="installItems" />
+          <div v-if="missingMcpSlugs.length" class="flow-alert" role="alert">
+            <span>缺少连接器：{{ missingMcpSlugs.join('、') }}</span>
+            <a-button size="small" type="primary" @click="openMcpForm">创建连接器</a-button>
+          </div>
           <div v-if="flowError" class="flow-alert" role="alert">{{ flowError }}</div>
         </section>
       </main>
@@ -224,6 +228,11 @@
         </template>
       </footer>
     </div>
+    <McpFormModal
+      v-model:open="mcpFormVisible"
+      :initial-data="mcpDraft"
+      @submitted="handleMcpCreated"
+    />
   </a-modal>
 </template>
 
@@ -231,6 +240,7 @@
 import { computed, defineComponent, h, nextTick, ref, watch } from 'vue'
 import { CheckCircle2, Circle, LoaderCircle, PackageOpen, X as XIcon, XCircle } from '@lucide/vue'
 import ShareConfigForm from '@/modules/agents/ui/ShareConfigForm.vue'
+import McpFormModal from './McpFormModal.vue'
 import { resolveApiErrorMessage } from '@/apis/base'
 import { skillApi } from '@/apis/skill_api'
 import { useUserStore } from '@/modules/identity'
@@ -260,6 +270,9 @@ const installTarget = ref('personal')
 const allowedAccessLevels = ref(['user'])
 const flowError = ref('')
 const shareConfigFormRef = ref(null)
+const mcpFormVisible = ref(false)
+const pendingMcpSlugs = ref([])
+const mcpDraft = ref(null)
 
 const StatusItemList = defineComponent({
   props: { items: { type: Array, default: () => [] } },
@@ -320,6 +333,9 @@ const installTargetLabel = computed(() =>
 const failedInstallItems = computed(() =>
   installItems.value.filter((item) => item.status === 'failed')
 )
+const missingMcpSlugs = computed(() => [
+  ...new Set(failedInstallItems.value.flatMap((item) => item.missing_mcps || []))
+])
 const successfulInstallCount = computed(
   () => installItems.value.filter((item) => item.status === 'success').length
 )
@@ -533,7 +549,8 @@ const applyInstallResults = (results, draftId) => {
     Object.assign(item, {
       slug: result.slug || item.slug,
       status: result.success ? 'success' : 'failed',
-      error: result.error || ''
+      error: result.error || '',
+      missing_mcps: result.missing_mcps || []
     })
   })
 }
@@ -556,6 +573,27 @@ const handleClose = async () => {
   }
   if (phase.value === 'reviewing') await discardDrafts()
   emit('close')
+}
+
+const openMcpForm = () => {
+  pendingMcpSlugs.value = [...missingMcpSlugs.value]
+  showNextMcpForm()
+}
+
+const showNextMcpForm = () => {
+  const [slug] = pendingMcpSlugs.value
+  mcpDraft.value = slug ? { slug, name: slug } : null
+  mcpFormVisible.value = Boolean(slug)
+}
+
+const handleMcpCreated = () => {
+  pendingMcpSlugs.value = pendingMcpSlugs.value.slice(1)
+  if (pendingMcpSlugs.value.length) {
+    showNextMcpForm()
+    return
+  }
+  mcpFormVisible.value = false
+  retryFailedItems()
 }
 
 const retryFailedItems = async () => {

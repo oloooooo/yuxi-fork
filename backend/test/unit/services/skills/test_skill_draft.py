@@ -159,3 +159,29 @@ def test_content_reference_cannot_escape_own_skill(path):
     """异常持久引用在访问文件前拒绝。"""
     with pytest.raises(ValueError, match="来源目录非法"):
         validated_shared_skill_parts("demo", path)
+
+
+@pytest.mark.asyncio
+async def test_personal_install_rejects_mcp_dependencies(tmp_path, monkeypatch):
+    """个人 Skill 不加载连接器依赖，带 MCP 声明时必须显式失败而不是静默丢弃。"""
+    from yuxi.modules.extensions.skills import personal
+    from yuxi.modules.workspace import paths
+
+    items = [{"slug": "alpha", "source_dir": "items/" + "a" * 32}]
+    draft_id = _write_draft(tmp_path, monkeypatch, items)
+    directory = tmp_path / "skill_import_drafts" / draft_id / items[0]["source_dir"]
+    (directory / "SKILL.md").write_text(
+        "---\nname: alpha\ndescription: example\nmcp_dependencies: [demo-missing-mcp]\n---\nBody",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(paths, "get_user_data_dir", lambda: tmp_path / "users")
+
+    results = await personal.confirm_personal_skill_install_draft(
+        draft_id=draft_id,
+        slugs=["alpha"],
+        operator=User(uid="owner", role="user"),
+    )
+
+    assert results[0]["success"] is False
+    assert "MCP 依赖" in results[0]["error"]
+    assert not (paths.user_workspace_dir("owner") / "agents/skills/alpha").exists()

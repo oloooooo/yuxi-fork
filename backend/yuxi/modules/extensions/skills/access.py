@@ -19,6 +19,14 @@ from yuxi.modules.identity.permissions.resource_permission import ADMIN_ROLES
 BUILTIN_SKILL_SHARE_CONFIG = {"access_level": "global", "department_ids": [], "user_uids": []}
 
 
+class MissingMcpDependencies(ValueError):
+    """Skill 声明的 MCP 依赖尚未注册，供安装界面提示补建连接器。"""
+
+    def __init__(self, slugs: list[str]):
+        self.slugs = list(slugs)
+        super().__init__(f"存在无效 MCP 依赖: {', '.join(self.slugs)}")
+
+
 async def lock_accessible_shared_skill_for_file(db: AsyncSession, user: User, slug: str) -> Skill | None:
     """在读取共享源文件期间锁定一行并重新检查权限。"""
     repo = SkillRepository(db)
@@ -80,7 +88,7 @@ async def validate_skill_dependencies(
     available_mcps = set(await get_enabled_mcp_server_slugs(db=db))
     invalid_mcps = [name for name in mcps if name not in available_mcps]
     if invalid_mcps:
-        raise ValueError(f"存在无效 MCP 依赖: {', '.join(invalid_mcps)}")
+        raise MissingMcpDependencies(invalid_mcps)
 
     invalid_skills = [name for name in skills if name not in available_skills]
     if invalid_skills:

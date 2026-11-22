@@ -11,6 +11,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from yuxi.infrastructure.runtime_settings import get_skill_data_dir
 from yuxi.modules.extensions.mcp.service import get_enabled_mcp_server_slugs
 from yuxi.modules.extensions.skills.access import (
+    MissingMcpDependencies as MissingMcpDependencies,
+)
+from yuxi.modules.extensions.skills.access import (
     can_skill_depend_on as can_skill_depend_on,
 )
 from yuxi.modules.extensions.skills.access import (
@@ -139,7 +142,10 @@ async def confirm_skill_install_draft(
             results.append({"slug": item.slug, "requested_slug": slug, "success": True, "skill": item.to_dict()})
         except Exception as exc:
             await db.rollback()
-            results.append({"slug": slug, "success": False, "error": str(exc)})
+            result = {"slug": slug, "success": False, "error": str(exc)}
+            if isinstance(exc, MissingMcpDependencies):
+                result["missing_mcps"] = exc.slugs
+            results.append(result)
 
     consume_installed_draft_items(draft_dir, data, {item["requested_slug"] for item in results if item["success"]})
     return results

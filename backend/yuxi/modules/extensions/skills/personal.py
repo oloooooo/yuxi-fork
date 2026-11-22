@@ -40,6 +40,9 @@ async def confirm_personal_skill_install_draft(
     for draft_item in draft_items:
         slug = draft_item.slug
         try:
+            metadata = await asyncio.to_thread(parse_skill_dir_metadata, draft_item.source_dir)
+            if metadata["mcp_dependencies"]:
+                raise ValueError("个人 Skill 不支持 MCP 依赖，请由管理员安装为共享 Skill")
             item = await install_personal_skill_dir(
                 str(operator.uid),
                 draft_item.source_dir,
