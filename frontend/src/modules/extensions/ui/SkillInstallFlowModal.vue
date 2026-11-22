@@ -228,10 +228,10 @@
         </template>
       </footer>
     </div>
-    <McpFormModal
+    <McpQuickCreateModal
       v-model:open="mcpFormVisible"
-      :initial-data="mcpDraft"
-      @submitted="handleMcpCreated"
+      :dependency="mcpDependency"
+      @created="handleMcpCreated"
     />
   </a-modal>
 </template>
@@ -240,7 +240,7 @@
 import { computed, defineComponent, h, nextTick, ref, watch } from 'vue'
 import { CheckCircle2, Circle, LoaderCircle, PackageOpen, X as XIcon, XCircle } from '@lucide/vue'
 import ShareConfigForm from '@/modules/agents/ui/ShareConfigForm.vue'
-import McpFormModal from './McpFormModal.vue'
+import McpQuickCreateModal from './McpQuickCreateModal.vue'
 import { resolveApiErrorMessage } from '@/apis/base'
 import { skillApi } from '@/apis/skill_api'
 import { useUserStore } from '@/modules/identity'
@@ -272,7 +272,7 @@ const flowError = ref('')
 const shareConfigFormRef = ref(null)
 const mcpFormVisible = ref(false)
 const pendingMcpSlugs = ref([])
-const mcpDraft = ref(null)
+const mcpDependency = ref(null)
 
 const StatusItemList = defineComponent({
   props: { items: { type: Array, default: () => [] } },
@@ -582,7 +582,8 @@ const openMcpForm = () => {
 
 const showNextMcpForm = () => {
   const [slug] = pendingMcpSlugs.value
-  mcpDraft.value = slug ? { slug, name: slug } : null
+  const owner = failedInstallItems.value.find((item) => (item.missing_mcps || []).includes(slug))
+  mcpDependency.value = slug ? { slug, name: slug, skillName: owner?.name || '' } : null
   mcpFormVisible.value = Boolean(slug)
 }
 
