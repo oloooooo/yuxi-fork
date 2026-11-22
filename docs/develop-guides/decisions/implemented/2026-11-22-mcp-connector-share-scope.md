@@ -19,7 +19,7 @@ Owner：backend/yuxi/modules/extensions/mcp/service.py
 3. 范围校验：`service.normalize_mcp_share_config` 复用 `normalize_permission_config(strict=True)`，并按角色限制可选范围（`allowed_mcp_access_levels`）：超管全局/部门/用户，管理员部门/用户，其他人仅本人。管理员提交全平台范围在 API 层返回 400。
 4. 服务：`create_mcp_server` 写入调用者的默认范围（超管全局、管理员仅本人）；`get_enabled_mcp_servers` 增加可选 `user` 并在传入时按可见性过滤，Agent 上下文选项与运行时装配都传当前用户；`available_mcp_servers` 在计算个人凭证状态前再按可见性过滤一次，范围被撤销的服务器在下一轮静默消失；新增 `update_mcp_share_config`。
 5. 路由：创建/删除/共享范围要求管理员并校验 MANAGE；详情与工具列表放宽到登录用户 + READ，越权 403；启用/停用、编辑、测试仍限超级管理员；`serialize_mcp_server` 按查看者计算 `can_manage` 与 `allowed_access_levels`，非超管隐藏 `url`/`headers`（共享凭据不可回读）。
-6. 前端：连接器卡片对管理员显示“新增”；详情页对可管理者显示“共享范围”（复用 Agent 的 `ShareConfigForm`），编辑/启停仅超管可见，删除按 `can_manage` 显示。
+6. 前端：连接器卡片对管理员显示“新增”；详情页对可管理者显示“共享范围”（复用 Agent 的 `ShareConfigForm`），编辑/启停仅超管可见，删除按 `can_manage` 显示。连接器页面隐藏“管理权限”（`showManageScope=false`）：管理员本就对整个目录 MANAGE，普通用户又被角色上限限制在 READ，该开关保存后不改变任何人的 `can_manage`，属于无消费者的配置项，先不暴露；Agent/Skill 的共享表单保持原样。
 
 ## 替代方案
 
@@ -43,4 +43,7 @@ Owner：backend/yuxi/modules/extensions/mcp/service.py
 - HTTP 集成：`test/integration/api/test_mcp_router.py` 23 passed；`test/integration/services/test_app_initialization.py` 与 `test_schema_migration_version.py` 38 passed；另用真实 HTTP 脚本验证 15 项——超管可设 global、管理员设 global 返回 400、管理员设 user 范围后可读、范围外用户绑定 Agent 返回 422 `无权新增智能体资源 mcps: ...`、`version:1` 返回 400。
 - 迁移：本地库 business v2 → v3 后 4 个存量连接器全部回填全平台范围，重复执行幂等。
 - 前端：`pnpm run lint:check`、`pnpm run build` 通过；`pnpm run test:unit` 唯一失败是 `frontend/src/pages/WorkspaceView.vue` 源码正则断言在 CRLF 检出下不匹配的既有行尾问题。Playwright 真实页面验证：管理员保存「指定人 + 单个用户」后回显与 API 一致、管理员详情页无编辑/启停但有删除与共享范围、普通用户不可见也未越权、超管全平台回显正确。
-- 未验证范围：`manage_scope`（管理权限）的页面保存与生效；部门共享分支未做页面验证；共享范围撤销后 Agent 运行时工具消失仅有单测与后端过滤覆盖，未跑一次完整对话；`docker-compose` 的 frontend dev target 缺 CMD 的既有缺陷未修。
+- 部门共享：页面把范围设为“默认部门”，部门内用户可见；改为“旅游规划部门”后该用户列表不再出现该连接器，页面同步隐藏。
+- 撤销共享的运行时效果：真实对话验证——共享期间 worker 日志显示 `mcps=['bailian-websearch']` 且 `Initialized MCP client with servers: ['bailian-websearch']`；把 read_scope 改为只含另一用户后，同一 Agent 下一轮显示 `mcps=[]`，工具不再装配。
+- 发现并修正：`manage_scope` 在连接器场景是死配置（管理员无条件 MANAGE，普通用户被角色上限卡在 READ），保留开关等于承诺不存在的效果，故连接器页面隐藏该开关，仅保留读取权限；共享范围校验（manage 必须包含在 read 内）仍在后端生效。
+- 未验证范围：`manage_scope` 对其他角色的实际治理效果（当前模型下无法构造“非管理员被授权管理”的用例）；`docker-compose` 的 frontend dev target 缺 CMD 的既有缺陷未修。

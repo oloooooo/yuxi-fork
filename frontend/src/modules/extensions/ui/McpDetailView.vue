@@ -129,6 +129,7 @@
             ref="shareConfigFormRef"
             v-model="shareConfigForm"
             :allowed-access-levels="server.allowed_access_levels || ['user']"
+            :show-manage-scope="false"
           />
         </section>
 

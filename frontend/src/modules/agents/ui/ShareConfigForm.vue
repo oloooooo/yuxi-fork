@@ -197,15 +197,19 @@ const props = defineProps({
   allowedAccessLevels: {
     type: Array,
     default: () => ['global', 'department', 'user']
-  }
+  },
+  showManageScope: { type: Boolean, default: true }
 })
 
 const emit = defineEmits(['update:modelValue'])
 
-const scopeOptions = [
+const baseScopeOptions = [
   { key: 'read_scope', title: '读取权限' },
   { key: 'manage_scope', title: '管理权限', description: '仅管理员生效，包含使用权限' }
 ]
+const scopeOptions = computed(() =>
+  baseScopeOptions.filter((option) => props.showManageScope || option.key !== 'manage_scope')
+)
 
 const baseShareModeOptions = [
   { value: 'global', title: '全局共享', description: '所有用户都可以访问', icon: Globe },
