@@ -298,11 +298,9 @@ const mcpInitialShareConfig = computed(() => {
   }
   return {
     version: 2,
-    read_scope: {
-      access_level: levels.includes('department') ? 'department' : 'user',
-      department_ids: [],
-      user_uids: []
-    },
+    read_scope: levels.includes('department')
+      ? { access_level: 'department', department_ids: [userStore.departmentId].filter(Boolean), user_uids: [] }
+      : { access_level: 'user', department_ids: [], user_uids: [userStore.uid].filter(Boolean) },
     manage_scope: null
   }
 })
