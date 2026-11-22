@@ -11,7 +11,9 @@ Owner：backend/yuxi/modules/extensions/skills/access.py
 ## 决策
 
 - 依赖校验在缺失时抛 `MissingMcpDependencies`，安装结果带上结构化 `missing_mcps`，安装页据此展示「缺少连接器」并提供「创建连接器」入口。
-- 失败页直接提供补建入口，用专用引导弹窗（`McpQuickCreateModal`）而不是通用连接器管理表单：标题点明「Skill「X」依赖连接器 slug」，字段只保留名称（预填 slug）、服务地址、访问令牌（可选，填了以 `Authorization: Bearer` 发送）；接入方式固定为共享请求头，避免要求管理员理解 transport/auth_mode/CreateMcpServerRequest 全量字段。
+- 失败页直接提供补建入口，复用连接器管理表单 `McpFormModal`（新增 `guided`/`guidedHint`/`initialShareConfig`/`submitText`）：标识锁定为 Skill 声明的 slug 并说明原因，其余字段（名称、描述、地址、传输方式、接入方式、请求头/凭证、超时、共享范围）与单独新建连接器完全一致。
+- 共享范围默认取 Skill 当前选择且可改；超出创建者权限（例如管理员补建一个全局 Skill）时降级为「部门」或「仅本人」，不强行把超管能力借出去。一次缺多个连接器时连续弹窗，按钮显示「保存并看下一个」，最后一个显示「保存并继续安装」，全部建完自动重试失败项。
+- 补建前先查已存在连接器：slug 已存在则跳过该步并提示「连接器已存在：…，直接重新安装」，避免同名冲突撞上后端吞掉原因后的通用 400。
 - 引导弹窗创建成功后自动重试失败项，回到确认安装页再点一次「确认安装」；不静默跳过失败项，也不自动装未确认的 Skill。
 - 补建时把 Skill 当前选的 `read_scope` 作为新连接器的 `share_config`（`POST /api/system/mcp-servers` 新增 `share_config` 字段）：否则超管补建会落成全局可见，没拿到该 Skill 的用户仍能在 `@` 菜单里看到并使用连接器（真实反馈）。管理员试图通过该字段建全局仍被权限校验拦下（400）。
 - 个人 Skill 不支持 MCP 依赖，确认安装时显式失败（`个人 Skill 不支持 MCP 依赖，请由管理员安装为共享 Skill`），不再静默丢弃。
@@ -21,7 +23,7 @@ Owner：backend/yuxi/modules/extensions/skills/access.py
 
 - 允许空地址的占位连接器：需要新增状态与迁移，且依赖校验放宽后 Skill 会在工具不可用的情况下「安装成功」。
 - 前端解析错误文本提取 slug：依赖文案，后端一改就断。
-- 在安装流程内嵌补建表单：与连接器管理页表单重复维护。
+- 在安装流程内嵌只含三个字段的简化表单：与连接器管理页重复维护，且管理员无法一次设好传输方式/认证方式/共享范围，补建完还要回管理页返工（第一版的真实问题）。
 
 ## 后果
 
@@ -35,4 +37,6 @@ Owner：backend/yuxi/modules/extensions/skills/access.py
 - Playwright：失败页出现「缺少连接器：demo-missing-mcp」与「创建连接器」；引导弹窗显示「Skill「垂类搜索」依赖连接器 bailian-vertical-search」，名称预填、服务地址/访问令牌为空；空地址提交被拦；填地址+令牌创建后自动回到确认安装，重装成功（截图 `.yuxi/playwright/mcpfill-01..08`、`guide-00..02`）。
 - API 回读补建结果：`url`/`auth_mode=headers`/`headers.Authorization=Bearer …`/`share_config.read_scope.access_level` 与 Skill 当前选择一致（部门范围时落 `department_ids`）。
 - 可见性回归：部门 1 的 Skill 补建出的连接器用部门 2 普通账号 `GET /api/system/mcp-servers` 看不到，部门 1 账号能看到；`admin` 建全局范围返回 400。
-- 未验证：一次缺多个连接器时的连续弹窗、已被 Agent 引用的连接器删除提示。
+- 补充说明：标识（slug）唯一，重复创建会被拒；显示名无唯一约束。补建时 slug 只读，名称默认等于 slug，因此正常流程不会撞名。
+- Playwright：一次缺两个连接器时的连续补建（`guide-mcp-alpha` → `guide-mcp-beta`）通过，两次创建各自保存独立的 `Authorization` 头，重装成功；结束后删除测试 Skill 与连接器，无残留。
+- 未验证：已被 Agent 引用的连接器删除提示（当前删除连接器不检查任何引用，本轮未改动该行为）。

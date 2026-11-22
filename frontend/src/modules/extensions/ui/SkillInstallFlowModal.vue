@@ -228,21 +228,26 @@
         </template>
       </footer>
     </div>
-    <McpQuickCreateModal
+    <McpFormModal
       v-model:open="mcpFormVisible"
-      :dependency="mcpDependency"
-      :share-config="shareConfig"
-      @created="handleMcpCreated"
+      guided
+      :guided-hint="mcpGuidedHint"
+      :initial-data="mcpDraft"
+      :initial-share-config="mcpInitialShareConfig"
+      :submit-text="mcpSubmitText"
+      @submitted="handleMcpCreated"
     />
   </a-modal>
 </template>
 
 <script setup>
 import { computed, defineComponent, h, nextTick, ref, watch } from 'vue'
+import { message } from 'ant-design-vue'
 import { CheckCircle2, Circle, LoaderCircle, PackageOpen, X as XIcon, XCircle } from '@lucide/vue'
 import ShareConfigForm from '@/modules/agents/ui/ShareConfigForm.vue'
-import McpQuickCreateModal from './McpQuickCreateModal.vue'
+import McpFormModal from './McpFormModal.vue'
 import { resolveApiErrorMessage } from '@/apis/base'
+import { mcpApi } from '@/apis/mcp_api'
 import { skillApi } from '@/apis/skill_api'
 import { useUserStore } from '@/modules/identity'
 
@@ -273,7 +278,34 @@ const flowError = ref('')
 const shareConfigFormRef = ref(null)
 const mcpFormVisible = ref(false)
 const pendingMcpSlugs = ref([])
-const mcpDependency = ref(null)
+const mcpDraft = ref(null)
+const mcpTotal = ref(0)
+const mcpGuidedHint = computed(() => {
+  const slug = mcpDraft.value?.slug || ''
+  const owner = mcpDraft.value?.skillName
+  const step = mcpTotal.value > 1 ? `（第 ${mcpTotal.value - pendingMcpSlugs.value.length + 1}/${mcpTotal.value} 个）` : ''
+  return owner ? `Skill「${owner}」依赖连接器 ${slug}${step}` : `依赖连接器 ${slug}${step}`
+})
+const mcpSubmitText = computed(() =>
+  pendingMcpSlugs.value.length > 1 ? '保存并看下一个' : '保存并继续安装'
+)
+const mcpInitialShareConfig = computed(() => {
+  const scope = shareConfig.value?.read_scope
+  if (!scope?.access_level) return null
+  const levels = allowedAccessLevels.value
+  if (levels.includes(scope.access_level)) {
+    return { version: 2, read_scope: JSON.parse(JSON.stringify(scope)), manage_scope: null }
+  }
+  return {
+    version: 2,
+    read_scope: {
+      access_level: levels.includes('department') ? 'department' : 'user',
+      department_ids: [],
+      user_uids: []
+    },
+    manage_scope: null
+  }
+})
 
 const StatusItemList = defineComponent({
   props: { items: { type: Array, default: () => [] } },
@@ -576,15 +608,32 @@ const handleClose = async () => {
   emit('close')
 }
 
-const openMcpForm = () => {
+const openMcpForm = async () => {
   pendingMcpSlugs.value = [...missingMcpSlugs.value]
+  mcpTotal.value = pendingMcpSlugs.value.length
+  if (!pendingMcpSlugs.value.length) return
+  try {
+    const result = await mcpApi.getMcpServers()
+    const existing = new Set((result.data || []).map((server) => server.slug))
+    const created = pendingMcpSlugs.value.filter((slug) => existing.has(slug))
+    if (created.length) {
+      message.info(`连接器已存在：${created.join('、')}，直接重新安装`)
+      pendingMcpSlugs.value = pendingMcpSlugs.value.filter((slug) => !existing.has(slug))
+    }
+  } catch (err) {
+    flowError.value = resolveApiErrorMessage(err, '读取连接器列表失败')
+  }
+  if (!pendingMcpSlugs.value.length) {
+    retryFailedItems()
+    return
+  }
   showNextMcpForm()
 }
 
 const showNextMcpForm = () => {
   const [slug] = pendingMcpSlugs.value
   const owner = failedInstallItems.value.find((item) => (item.missing_mcps || []).includes(slug))
-  mcpDependency.value = slug ? { slug, name: slug, skillName: owner?.name || '' } : null
+  mcpDraft.value = slug ? { slug, name: slug, skillName: owner?.name || '' } : null
   mcpFormVisible.value = Boolean(slug)
 }
 
