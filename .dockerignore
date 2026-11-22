@@ -1,0 +1,49 @@
+# 忽略 Git 相关的文件夹
+.git
+.gitignore
+
+# 私有配置和独立运行槽位不得进入构建上下文
+.env
+.env.*
+!.env.template
+**/.env
+**/.env.*
+!**/.env.template
+.yuxi/
+.playwright*/
+docs/vibe/
+tmp/
+
+# macOS AppleDouble 元数据文件；它们可能携带不可读取的 xattr，不能进入 Docker 构建上下文
+._*
+**/._*
+.AppleDouble
+
+# 忽略 Python 的缓存文件
+__pycache__/
+*.pyc
+*.pyo
+
+# 忽略虚拟环境目录
+venv/
+env/
+backend/.venv/
+
+# 忽略 node_modules 文件夹（前端项目）
+frontend/node_modules/
+docs/node_modules/
+docs/.vitepress/cache/
+docs/.vitepress/dist/
+
+# 忽略 Docker 运行时数据卷
+docker/volumes/
+
+# 忽略日志和临时文件
+*.log
+*.tmp
+
+# 忽略 Docker 本身的文件
+Dockerfile
+docker-compose.yml
+# minio 受限网络叠层的二进制目录；构建时作为命名上下文单独传入
+docker/minio/dist/

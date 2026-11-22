@@ -1,0 +1,90 @@
+# 后端单元测试 CI：此前后端 pytest 从未接入 CI，改动回归无人把关。
+# 本工作流在 push/PR 时运行 unit 层测试（不依赖 docker 服务）。
+name: Backend Unit Tests
+
+on:
+  workflow_call:
+  workflow_dispatch:
+  push:
+    tags: ['v[0-9]*']
+    branches:
+      - main
+      - 'develop/**'
+    paths:
+      - '.env.template'
+      - '.dockerignore'
+      - 'backend/**'
+      - 'backend/pyproject.toml'
+      - 'docker/**'
+      - 'docker-compose.yml'
+      - 'docker-compose.prod.yml'
+      - 'docker-compose.mirror.yml'
+      - 'scripts/init.sh'
+      - 'scripts/pull_image.sh'
+      - 'scripts/pull_image_for_mirror.sh'
+      - 'scripts/pull_image_for_mirror.ps1'
+      - 'scripts/ci/test_docker_build_context.py'
+      - 'scripts/ci/test_container_permissions.py'
+      - '.github/workflows/test.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  unit-tests:
+    name: Backend unit tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Verify private files stay outside the Docker build context
+        working-directory: .
+        run: python3 -m unittest scripts.ci.test_docker_build_context
+
+      - name: Verify image and storage permissions
+        working-directory: .
+        run: python3 -m unittest scripts.ci.test_container_permissions
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.12.6"
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: uv sync --locked --group test
+
+      - name: Verify test reports and failure propagation
+        working-directory: .
+        run: backend/.venv/bin/python -m unittest scripts.ci.test_reporting
+
+      - name: Run complete unit inventory
+        run: uv run pytest test/unit -m 'not slow' -q --junitxml=test/ci-reports/unit.xml --durations=20 --durations-min=1.0
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: backend-unit-junit
+          path: backend/test/ci-reports/*.xml
+          retention-days: 7
+          if-no-files-found: warn
+
+  result:
+    if: always()
+    needs: [unit-tests]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check all job results
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: python3 scripts/ci/gate.py check-jobs

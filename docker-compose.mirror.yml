@@ -1,0 +1,23 @@
+# 受限网络叠层：只覆盖需要绕开外网的构件，不改上游 compose 文件。
+# 用法（Windows PowerShell 用分号分隔）：
+#   export COMPOSE_FILE=docker-compose.yml:docker-compose.mirror.yml
+#   docker compose up -d
+# 或按次叠加（显式 -f 会覆盖 COMPOSE_FILE，两者不要混用）：
+#   docker compose -f docker-compose.yml -f docker-compose.mirror.yml up -d
+#   docker compose -f docker-compose.prod.yml -f docker-compose.mirror.yml --env-file .env.prod up -d
+services:
+  minio:
+    build:
+      # 上游 context 是 ./docker/minio，这里只换 Dockerfile：用预下载的二进制，不装任何包
+      dockerfile: Dockerfile.mirror
+      # 放 minio.linux-<arch>.<版本> 的宿主机目录；默认在仓库内，已被 .gitignore 忽略
+      additional_contexts:
+        minio-binary: ${MINIO_BINARY_DIR:-./docker/minio/dist}
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:9000/minio/health/live"]
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend.Dockerfile
+      # 只用宿主机构建好的 frontend/dist，受限网络无法在镜像内跑 npm
+      target: ${YUXI_FRONTEND_BUILD_TARGET:-prebuilt}

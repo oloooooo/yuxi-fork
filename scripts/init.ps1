@@ -1,0 +1,324 @@
+# Yuxi Initialization Script for PowerShell
+# This script helps set up the environment for the Yuxi project
+
+param([switch]$ValidateSecurityEnv)
+
+function New-RandomHex($ByteCount) {
+    $bytes = [byte[]]::new($ByteCount)
+    $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    try {
+        $rng.GetBytes($bytes)
+        return -join ($bytes | ForEach-Object { $_.ToString("x2") })
+    } finally {
+        $rng.Dispose()
+    }
+}
+
+function Test-EnvValue($Name) {
+    return -not [string]::IsNullOrWhiteSpace((Get-EnvValue $Name))
+}
+
+function Set-EnvValue($Name, $Value) {
+    $escapedName = [regex]::Escape($Name)
+    if (Select-String -Path ".env" -Pattern "^$escapedName=" -Quiet) {
+        $written = $false
+        $envContent = Get-Content -Path ".env" | ForEach-Object {
+            if ($_ -match "^$escapedName=") {
+                if (-not $written) {
+                    "$Name=$Value"
+                    $written = $true
+                }
+            } else {
+                $_
+            }
+        }
+        $envContent | Set-Content -Path ".env" -Encoding UTF8
+    } else {
+        "`n$Name=$Value" | Add-Content -Path ".env" -Encoding UTF8
+    }
+}
+
+function Get-EnvValue($Name) {
+    $escapedName = [regex]::Escape($Name)
+    $line = Get-Content -Path ".env" | Where-Object { $_ -match "^$escapedName=" } | Select-Object -First 1
+    if ($null -eq $line) {
+        return ""
+    }
+    return $line.Substring($line.IndexOf("=") + 1)
+}
+
+function Read-HiddenValue($Prompt) {
+    $secureValue = Read-Host $Prompt -AsSecureString
+    $pointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureValue)
+    try {
+        return [Runtime.InteropServices.Marshal]::PtrToStringBSTR($pointer)
+    } finally {
+        [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($pointer)
+    }
+}
+
+function Test-SecuritySecretValue($Value, [string[]]$OtherValues = @()) {
+    if ([string]::IsNullOrWhiteSpace($Value) -or $Value.Trim().Length -lt 32 -or $Value -ne $Value.Trim()) {
+        return $false
+    }
+    if ($Value.StartsWith('"') -or $Value.EndsWith('"') -or $Value.StartsWith("'") -or $Value.EndsWith("'")) {
+        return $false
+    }
+    foreach ($other in $OtherValues) {
+        if (-not [string]::IsNullOrEmpty($other) -and $Value -eq $other) {
+            return $false
+        }
+    }
+    return $true
+}
+
+function Read-SecuritySecret($Name, [string[]]$OtherValues = @()) {
+    while ($true) {
+        $value = Read-HiddenValue "Please enter your $Name (press Enter to auto-generate)"
+        if ([string]::IsNullOrEmpty($value)) {
+            $value = New-RandomHex 32
+            Write-Host "Generated $Name and saved it to .env." -ForegroundColor Green
+        }
+        if (Test-SecuritySecretValue $value $OtherValues) {
+            return $value
+        }
+        Write-Host "❌ $Name must contain at least 32 non-whitespace characters and must not reuse another security secret." -ForegroundColor Red
+    }
+}
+
+function Ensure-SecuritySecret($Name, [string[]]$OtherNames = @()) {
+    $current = Get-EnvValue $Name
+    $otherValues = @($OtherNames | ForEach-Object { Get-EnvValue $_ })
+    if (Test-SecuritySecretValue $current $otherValues) {
+        return
+    }
+
+    Write-Host "$Name is missing, too short, or reuses another security secret in .env." -ForegroundColor Yellow
+    $value = Read-SecuritySecret $Name $otherValues
+    Set-EnvValue $Name $value
+}
+
+function Assert-SecuritySecrets {
+    $jwtSecret = Get-EnvValue "JWT_SECRET_KEY"
+    $apiKeySecret = Get-EnvValue "API_KEY_DERIVATION_SECRET"
+    if (-not (Test-SecuritySecretValue $jwtSecret)) {
+        throw "JWT_SECRET_KEY must contain at least 32 non-whitespace characters."
+    }
+    if (-not (Test-SecuritySecretValue $apiKeySecret @($jwtSecret))) {
+        throw "API_KEY_DERIVATION_SECRET must be at least 32 characters and independent from JWT_SECRET_KEY."
+    }
+}
+
+function Ensure-RequiredApiEnv {
+    if (Test-EnvValue "SILICONFLOW_API_KEY") {
+        return
+    }
+
+    Write-Host "SILICONFLOW_API_KEY is missing in .env." -ForegroundColor Yellow
+    do {
+        $SILICONFLOW_API_KEY = Read-Host "Please enter your SILICONFLOW_API_KEY"
+        if ([string]::IsNullOrEmpty($SILICONFLOW_API_KEY)) {
+            Write-Host "❌ API Key cannot be empty. Please try again." -ForegroundColor Red
+        }
+    } while ([string]::IsNullOrEmpty($SILICONFLOW_API_KEY))
+    Set-EnvValue "SILICONFLOW_API_KEY" $SILICONFLOW_API_KEY
+}
+
+function Ensure-JwtEnv {
+    Ensure-SecuritySecret "JWT_SECRET_KEY"
+    Ensure-SecuritySecret "API_KEY_DERIVATION_SECRET" @("JWT_SECRET_KEY")
+
+    if (-not (Test-EnvValue "YUXI_INSTANCE_ID")) {
+        Write-Host "YUXI_INSTANCE_ID is missing in .env." -ForegroundColor Yellow
+        $YUXI_INSTANCE_ID = Read-Host "Please enter your YUXI_INSTANCE_ID (press Enter to auto-generate)"
+        if ([string]::IsNullOrEmpty($YUXI_INSTANCE_ID)) {
+            $YUXI_INSTANCE_ID = "instance-$(New-RandomHex 8)"
+            Write-Host "Generated YUXI_INSTANCE_ID and saved it to .env." -ForegroundColor Green
+        }
+
+        Set-EnvValue "YUXI_INSTANCE_ID" $YUXI_INSTANCE_ID
+    }
+}
+
+
+if ($ValidateSecurityEnv) {
+    if (-not (Test-Path ".env")) {
+        throw ".env does not exist"
+    }
+    Assert-SecuritySecrets
+    exit 0
+}
+
+function Test-SkipExistingImage($ImageTag) {
+    & docker image inspect $ImageTag *> $null
+    if ($LASTEXITCODE -ne 0) {
+        return $false
+    }
+
+    Write-Host "⏭️  $ImageTag already exists. Skipping pull." -ForegroundColor Green
+    return $true
+}
+
+Write-Host "🚀 Initializing Yuxi project..." -ForegroundColor Cyan
+Write-Host "==================================" -ForegroundColor Cyan
+
+# Check if .env file exists
+if (Test-Path ".env") {
+    Write-Host "✅ .env file already exists. Checking required settings." -ForegroundColor Green
+    Ensure-RequiredApiEnv
+    Ensure-JwtEnv
+    Assert-SecuritySecrets
+} else {
+    Write-Host "📝 .env file not found. Let's set up your environment variables." -ForegroundColor Yellow
+    Write-Host ""
+
+    # Get SILICONFLOW_API_KEY
+    Write-Host "🔑 SiliconFlow API Key required" -ForegroundColor Yellow
+    Write-Host "Get your API key from: https://cloud.siliconflow.cn/i/Eo5yTHGJ" -ForegroundColor Blue
+    Write-Host "Note: Press Ctrl+C at any time to cancel" -ForegroundColor Gray
+    Write-Host ""
+
+    do {
+        $apiKey = Read-Host "Please enter your SILICONFLOW_API_KEY"
+        if ([string]::IsNullOrEmpty($apiKey)) {
+            Write-Host "❌ API Key cannot be empty. Please try again." -ForegroundColor Red
+        }
+    } while ([string]::IsNullOrEmpty($apiKey))
+
+    Write-Host "JWT security settings" -ForegroundColor Yellow
+    $JWT_SECRET_KEY = Read-SecuritySecret "JWT_SECRET_KEY"
+    $API_KEY_DERIVATION_SECRET = Read-SecuritySecret "API_KEY_DERIVATION_SECRET" @($JWT_SECRET_KEY)
+
+    $YUXI_INSTANCE_ID = Read-Host "Please enter your YUXI_INSTANCE_ID (press Enter to auto-generate)"
+    if ([string]::IsNullOrEmpty($YUXI_INSTANCE_ID)) {
+        $YUXI_INSTANCE_ID = "instance-$(New-RandomHex 8)"
+        Write-Host "Generated YUXI_INSTANCE_ID and saved it to .env." -ForegroundColor Green
+    }
+
+
+    # Create .env file
+    $envContent = @"
+# SiliconFlow API Key (required)
+SILICONFLOW_API_KEY=$apiKey
+
+# Web Search Provider settings
+"@
+
+    foreach ($searchName in @("WEB_SEARCH_PROVIDER", "DOUBAO_SEARCH_API_KEY", "TAVILY_API_KEY", "DEEPSEEK_API_KEY")) {
+        $searchValue = [Environment]::GetEnvironmentVariable($searchName)
+        if (-not [string]::IsNullOrEmpty($searchValue)) {
+            # 单引号 dotenv 值保留美元符号，避免 Compose 插值。
+            if ($searchValue -match "['\r\n]") { throw "$searchName contains unsupported characters" }
+            $envContent += "`n${searchName}='$searchValue'"
+        }
+    }
+
+    $envContent += @"
+
+# JWT security settings
+JWT_SECRET_KEY=$JWT_SECRET_KEY
+API_KEY_DERIVATION_SECRET=$API_KEY_DERIVATION_SECRET
+YUXI_INSTANCE_ID=$YUXI_INSTANCE_ID
+"@
+
+    $envContent | Out-File -FilePath ".env" -Encoding UTF8
+    Assert-SecuritySecrets
+    Write-Host "✅ .env file created successfully!" -ForegroundColor Green
+
+    # Clear the variables from memory
+    Remove-Variable -Name "apiKey" -ErrorAction SilentlyContinue
+    Remove-Variable -Name "JWT_SECRET_KEY" -ErrorAction SilentlyContinue
+    Remove-Variable -Name "API_KEY_DERIVATION_SECRET" -ErrorAction SilentlyContinue
+    Remove-Variable -Name "YUXI_INSTANCE_ID" -ErrorAction SilentlyContinue
+}
+
+# 默认 container；已有显式后端和 runner 凭据保持不变。
+$sandboxBackend = Get-EnvValue "SANDBOX_BACKEND"
+if ([string]::IsNullOrWhiteSpace($sandboxBackend)) {
+    $sandboxBackend = "container"
+    Set-EnvValue "SANDBOX_BACKEND" $sandboxBackend
+}
+if ($sandboxBackend -notin @("container", "cube")) {
+    throw "SANDBOX_BACKEND must be cube or container."
+}
+if ($sandboxBackend -eq "container") {
+    $runnerToken = Get-EnvValue "SANDBOX_RUNNER_TOKEN"
+    if ([string]::IsNullOrEmpty($runnerToken)) {
+        Set-EnvValue "SANDBOX_RUNNER_TOKEN" (New-RandomHex 32)
+    } elseif (-not (Test-SecuritySecretValue $runnerToken)) {
+        throw "SANDBOX_RUNNER_TOKEN must be at least 32 characters without surrounding whitespace or quotes."
+    }
+    Remove-Variable runnerToken
+}
+
+# 受限网络部署：这些变量写进 .env，后续 compose 构建直接读取
+foreach ($mirrorName in @("APT_MIRROR", "PYPI_INDEX_URL", "YUXI_FRONTEND_BUILD_TARGET", "MINIO_BINARY_DIR")) {
+    $mirrorValue = [System.Environment]::GetEnvironmentVariable($mirrorName)
+    if (-not [string]::IsNullOrWhiteSpace($mirrorValue)) {
+        Set-EnvValue $mirrorName $mirrorValue
+    }
+}
+
+Write-Host ""
+Write-Host "Configure Search and Fetch after login in Settings -> 网络搜索." -ForegroundColor Blue
+Write-Host "📦 Pulling Docker images..." -ForegroundColor Cyan
+Write-Host "=========================" -ForegroundColor Cyan
+
+# List of Docker images to pull
+$images = @(
+    "alpine:3.20",
+    "python:3.13-slim",
+    "node:24-slim",
+    "node:22-alpine",
+    "milvusdb/milvus:v3.0.2",
+    "neo4j:5.26.29",
+    "ghcr.io/astral-sh/uv:0.12.6",
+    "nginx:alpine",
+    "quay.io/coreos/etcd:v3.5.25",
+    "postgres:16",
+    "redis:7.4.10-alpine"
+)
+
+# Pull each image
+foreach ($image in $images) {
+    if (Test-SkipExistingImage $image) {
+        continue
+    }
+
+    Write-Host "🔄 Pulling ${image}..." -ForegroundColor Yellow
+    try {
+        & scripts/pull_image_for_mirror.ps1 $image
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "✅ Successfully pulled ${image}" -ForegroundColor Green
+        } else {
+            Write-Host "❌ Failed to pull ${image}" -ForegroundColor Red
+            exit 1
+        }
+    } catch {
+        Write-Host "❌ Error pulling ${image}: $_" -ForegroundColor Red
+        exit 1
+    }
+}
+
+# MinIO 官方镜像已全面下架，改为从仓库内 Dockerfile 构建
+Write-Host "🔄 Building minio and storage-init images..." -ForegroundColor Yellow
+$mirrorArgs = @()
+if ($env:MINIO_BINARY_DIR -or (Get-ChildItem -Path "docker/minio/dist" -Filter "minio.linux-*" -ErrorAction SilentlyContinue)) {
+    $mirrorArgs = @("-f", "docker-compose.mirror.yml")
+}
+docker compose -f docker-compose.yml @mirrorArgs build minio storage-init
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "❌ Failed to build minio or storage-init image" -ForegroundColor Red
+    exit 1
+}
+
+
+Write-Host ""
+Write-Host "🎉 Initialization complete!" -ForegroundColor Green
+Write-Host "==========================" -ForegroundColor Green
+if ($sandboxBackend -eq "container") {
+    Write-Host "You can now run: docker compose --profile container up -d --build" -ForegroundColor Cyan
+} else {
+    Write-Host "You can now run: docker compose up -d --build" -ForegroundColor Cyan
+}
+Write-Host "Backend code changes require an explicit service restart; frontend hot-reload remains enabled." -ForegroundColor Cyan

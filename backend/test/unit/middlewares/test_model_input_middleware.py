@@ -1,0 +1,310 @@
+from __future__ import annotations
+
+from types import SimpleNamespace
+
+import pytest
+from langchain.agents.middleware.types import ModelRequest, ModelResponse
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_openai import ChatOpenAI
+
+from yuxi.modules.agents.runtime.middlewares.model_input import ImageInputCompatibilityMiddleware
+from yuxi.modules.extensions.tools.builtin.ocr_parse_file import ocr_parse_file
+
+
+def _request(model, messages, *, tools=None) -> ModelRequest:
+    return ModelRequest(model=model, messages=messages, tools=tools or [])
+
+
+def _openai_model() -> ChatOpenAI:
+    return ChatOpenAI(model="test-model", api_key="test-key", base_url="https://example.com/v1")
+
+
+def _read_file_image_message(path: str = "/home/user/workspace/uploads/image.png") -> ToolMessage:
+    return ToolMessage(
+        content_blocks=[{"type": "image", "base64": "abc", "mime_type": "image/png"}],
+        tool_call_id="call_image",
+        additional_kwargs={"read_file_path": path, "read_file_media_type": "image/png"},
+    )
+
+
+def test_bridges_openai_tool_images_after_parallel_tool_results_without_mutating_state() -> None:
+    middleware = ImageInputCompatibilityMiddleware()
+    original_messages = [
+        HumanMessage("读图并列目录"),
+        ToolMessage(
+            content_blocks=[{"type": "image", "base64": "abc", "mime_type": "image/png"}],
+            name="read_file",
+            tool_call_id="call_image",
+        ),
+        ToolMessage(content="['a.png']", name="ls", tool_call_id="call_ls"),
+    ]
+    seen = {}
+
+    def handler(request):
+        seen["messages"] = request.messages
+        return ModelResponse(result=[AIMessage(content="ok")])
+
+    middleware.wrap_model_call(_request(_openai_model(), original_messages), handler)
+
+    messages = seen["messages"]
+    assert original_messages[1].content_blocks[0]["type"] == "image"
+    assert [message.type for message in messages] == ["human", "tool", "tool", "human"]
+    assert messages[1].tool_call_id == "call_image"
+    assert isinstance(messages[1].content, str)
+    assert messages[2].tool_call_id == "call_ls"
+    assert messages[3].content_blocks[1] == {
+        "type": "image",
+        "base64": "abc",
+        "mime_type": "image/png",
+    }
+
+
+def test_keeps_non_openai_tool_images_unchanged() -> None:
+    middleware = ImageInputCompatibilityMiddleware()
+    messages = [
+        ToolMessage(
+            content_blocks=[{"type": "image", "base64": "abc", "mime_type": "image/png"}],
+            tool_call_id="call_image",
+        )
+    ]
+    seen = {}
+
+    def handler(request):
+        seen["messages"] = request.messages
+        return ModelResponse(result=[AIMessage(content="ok")])
+
+    middleware.wrap_model_call(_request(SimpleNamespace(), messages), handler)
+
+    assert seen["messages"] is messages
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("error_message", "status_code"),
+    [
+        ("This model does not support image input", 400),
+        ("No endpoints found that support image input", 404),
+        (
+            "Error code: 400 - {'code': 20041, 'message': 'The model is not a VLM (Vision Language Model). Please use text-only prompts.'}",
+            400,
+        ),
+    ],
+)
+async def test_translates_provider_image_rejection_to_ocr_fallback(error_message: str, status_code: int) -> None:
+    middleware = ImageInputCompatibilityMiddleware()
+    request = _request(
+        SimpleNamespace(),
+        [_read_file_image_message()],
+        tools=[ocr_parse_file],
+    )
+    calls = 0
+
+    async def handler(_request):
+        nonlocal calls
+        calls += 1
+        error = RuntimeError(error_message)
+        error.status_code = status_code
+        raise error
+
+    response = await middleware.awrap_model_call(request, handler)
+
+    assert calls == 1
+    assert response.result[0].content == "当前模型不支持图片输入，正在改用 OCR 工具提取图片文字。"
+    assert response.result[0].tool_calls[0]["name"] == "ocr_parse_file"
+    assert response.result[0].tool_calls[0]["args"] == {"file_path": "/home/user/workspace/uploads/image.png"}
+
+
+@pytest.mark.asyncio
+async def test_does_not_mask_unrelated_provider_errors_when_image_is_present() -> None:
+    middleware = ImageInputCompatibilityMiddleware()
+    request = _request(
+        SimpleNamespace(),
+        [HumanMessage(content=[{"type": "image_url", "image_url": {"url": "https://example.com/a.png"}}])],
+    )
+
+    async def handler(_request):
+        error = RuntimeError("invalid tool schema")
+        error.status_code = 400
+        raise error
+
+    with pytest.raises(RuntimeError, match="invalid tool schema"):
+        await middleware.awrap_model_call(request, handler)
+
+
+@pytest.mark.asyncio
+async def test_translates_openrouter_missing_vision_endpoint() -> None:
+    middleware = ImageInputCompatibilityMiddleware()
+    request = _request(
+        SimpleNamespace(),
+        [_read_file_image_message()],
+        tools=[ocr_parse_file],
+    )
+
+    async def handler(_request):
+        error = RuntimeError("No endpoints found that support image input")
+        error.status_code = 404
+        raise error
+
+    response = await middleware.awrap_model_call(request, handler)
+
+    assert response.result[0].tool_calls[0]["name"] == "ocr_parse_file"
+
+
+def test_omits_historical_tool_image_after_ocr_fallback() -> None:
+    middleware = ImageInputCompatibilityMiddleware()
+    path = "/home/user/workspace/uploads/image.png"
+    messages = [
+        _read_file_image_message(path),
+        AIMessage(
+            content="正在改用 OCR。",
+            tool_calls=[
+                {
+                    "name": "ocr_parse_file",
+                    "args": {"file_path": path},
+                    "id": "call_ocr",
+                }
+            ],
+        ),
+        ToolMessage(content="OCR result", tool_call_id="call_ocr"),
+    ]
+    seen = {}
+
+    def handler(request):
+        seen["messages"] = request.messages
+        return ModelResponse(result=[AIMessage(content="ok")])
+
+    middleware.wrap_model_call(_request(_openai_model(), messages), handler)
+
+    assert [message.type for message in seen["messages"]] == ["tool", "ai", "tool"]
+    assert "OCR fallback was requested" in seen["messages"][0].content
+
+
+@pytest.mark.asyncio
+async def test_does_not_report_malformed_image_as_unsupported_model() -> None:
+    middleware = ImageInputCompatibilityMiddleware()
+    request = _request(
+        SimpleNamespace(),
+        [HumanMessage(content=[{"type": "image_url", "image_url": {"url": "broken"}}])],
+    )
+
+    async def handler(_request):
+        error = RuntimeError("image_url provided is not a valid image")
+        error.status_code = 400
+        raise error
+
+    with pytest.raises(RuntimeError, match="not a valid image"):
+        await middleware.awrap_model_call(request, handler)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("asynchronous", [False, True])
+@pytest.mark.parametrize("enabled", [False, True])
+async def test_image_rejection_respects_configured_ocr_tool(asynchronous: bool, enabled: bool) -> None:
+    """同步与异步回退只调用本次已启用的工具，不由中间件注入。"""
+    middleware = ImageInputCompatibilityMiddleware()
+    assert getattr(middleware, "tools", []) == []
+    request = _request(SimpleNamespace(), [_read_file_image_message()], tools=[ocr_parse_file] if enabled else [])
+
+    def reject(_request):
+        error = RuntimeError("This model does not support image input")
+        error.status_code = 400
+        raise error
+
+    async def async_reject(request):
+        return reject(request)
+
+    response = await middleware.awrap_model_call(request, async_reject) if asynchronous else middleware.wrap_model_call(request, reject)
+    message = response.result[0]
+    if enabled:
+        assert [call["name"] for call in message.tool_calls] == ["ocr_parse_file"]
+        assert message.tool_calls[0]["args"]["file_path"] == "/home/user/workspace/uploads/image.png"
+    else:
+        assert message.tool_calls == []
+        assert "OCR 解析工具未启用" in message.content
+
+
+@pytest.mark.parametrize("model", [_openai_model(), SimpleNamespace()])
+def test_ocr_retry_removes_processed_image_for_every_provider(model) -> None:
+    middleware = ImageInputCompatibilityMiddleware()
+    image = _read_file_image_message()
+    messages = [
+        image,
+        AIMessage(
+            content="",
+            tool_calls=[{"name": "ocr_parse_file", "args": {"file_path": "/home/user/workspace/uploads/image.png"}, "id": "ocr"}],
+        ),
+        ToolMessage(content="识别文字", tool_call_id="ocr"),
+    ]
+    seen = {}
+
+    def handler(request):
+        seen["messages"] = request.messages
+        return ModelResponse(result=[AIMessage(content="ok")])
+
+    middleware.wrap_model_call(_request(model, messages), handler)
+
+    assert image.content_blocks[0]["type"] == "image"
+    assert all(block.get("type") != "image" for message in seen["messages"] for block in message.content_blocks)
+    assert seen["messages"][0].tool_call_id == "call_image"
+    assert seen["messages"][-1].content == "识别文字"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("model", [_openai_model(), SimpleNamespace()])
+async def test_ocr_fallback_only_requests_unprocessed_images(model) -> None:
+    old_path = "/workspace/old.png"
+    new_path = "/workspace/new.png"
+    messages = [
+        _read_file_image_message(old_path),
+        AIMessage(content="", tool_calls=[{"name": "ocr_parse_file", "args": {"file_path": old_path}, "id": "ocr"}]),
+        ToolMessage(content="old text", tool_call_id="ocr"),
+        _read_file_image_message(new_path),
+    ]
+
+    async def handler(_request):
+        error = RuntimeError("This model does not support image input")
+        error.status_code = 400
+        raise error
+
+    result = await ImageInputCompatibilityMiddleware().awrap_model_call(_request(model, messages, tools=[ocr_parse_file]), handler)
+    assert [call["args"]["file_path"] for call in result.result[0].tool_calls] == [new_path]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("model", [_openai_model(), SimpleNamespace()])
+@pytest.mark.parametrize("asynchronous", [False, True])
+@pytest.mark.parametrize("ocr_status", ["success", "error"])
+@pytest.mark.parametrize("reread", [False, True])
+async def test_ocr_candidates_follow_read_order_and_allow_rereading(model, asynchronous, ocr_status, reread) -> None:
+    """OCR 请求排除旧图，重新读取可再次回退，重复新图只请求一次。"""
+    old_path, new_path = "/workspace/old.png", "/workspace/new.png"
+    messages = [
+        _read_file_image_message(old_path),
+        AIMessage(content="", tool_calls=[{"name": "ocr_parse_file", "args": {"file_path": old_path}, "id": "ocr"}]),
+        ToolMessage(content="OCR result", tool_call_id="ocr", status=ocr_status),
+        _read_file_image_message(new_path),
+    ]
+    if reread:
+        messages.append(_read_file_image_message(old_path))
+    messages.append(_read_file_image_message(new_path))
+    original = [message.model_dump() for message in messages]
+    observed = []
+
+    def reject(request):
+        """记录实际图片视图后模拟服务端拒绝图片输入。"""
+        observed.extend(request.messages)
+        error = RuntimeError("This model does not support image input")
+        error.status_code = 400
+        raise error
+
+    async def async_reject(request):
+        """异步入口复用相同的可观察拒绝行为。"""
+        return reject(request)
+
+    middleware = ImageInputCompatibilityMiddleware()
+    request = _request(model, messages, tools=[ocr_parse_file])
+    result = await middleware.awrap_model_call(request, async_reject) if asynchronous else middleware.wrap_model_call(request, reject)
+    expected = [new_path, old_path] if reread else [new_path]
+    assert [call["args"]["file_path"] for call in result.result[0].tool_calls] == expected
+    assert sum(block.get("type") == "image" for message in observed for block in message.content_blocks) == 2 + int(reread)
+    assert [message.model_dump() for message in messages] == original
