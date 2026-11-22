@@ -59,7 +59,8 @@ import { mcpApi } from '@/apis/mcp_api'
 
 const props = defineProps({
   open: { type: Boolean, default: false },
-  dependency: { type: Object, default: null }
+  dependency: { type: Object, default: null },
+  shareConfig: { type: Object, default: null }
 })
 
 const emit = defineEmits(['update:open', 'created'])
@@ -95,13 +96,17 @@ const handleSubmit = async () => {
   submitting.value = true
   try {
     const token = form.token.trim()
+    const readScope = props.shareConfig?.read_scope
     const result = await mcpApi.createMcpServer({
       slug,
       name: form.name.trim(),
       transport: 'streamable_http',
       url: form.url.trim(),
       auth_mode: token ? 'headers' : 'none',
-      headers: token ? { Authorization: `Bearer ${token}` } : undefined
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      share_config: readScope
+        ? { version: 2, read_scope: readScope, manage_scope: null }
+        : undefined
     })
     if (!result.success) {
       message.error(result.message || '创建连接器失败')

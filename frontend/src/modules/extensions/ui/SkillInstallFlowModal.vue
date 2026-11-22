@@ -231,6 +231,7 @@
     <McpQuickCreateModal
       v-model:open="mcpFormVisible"
       :dependency="mcpDependency"
+      :share-config="shareConfig"
       @created="handleMcpCreated"
     />
   </a-modal>

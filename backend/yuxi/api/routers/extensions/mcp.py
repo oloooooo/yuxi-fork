@@ -50,6 +50,7 @@ class CreateMcpServerRequest(BaseModel):
     headers: dict | None = Field(None, description="HTTP 请求头")
     timeout: StrictInt | None = Field(None, description="HTTP 超时时间（秒）")
     sse_read_timeout: StrictInt | None = Field(None, description="SSE 读取超时（秒）")
+    share_config: dict | None = Field(None, description="共享范围；不填则按创建者默认")
 
 
 class UpdateMcpServerRequest(BaseModel):
@@ -149,6 +150,7 @@ async def create_mcp_server_route(
             headers=request.headers,
             timeout=request.timeout,
             sse_read_timeout=request.sse_read_timeout,
+            share_config=request.share_config,
             created_by=current_user.username,
             auth_mode=request.auth_mode,
             oauth_config=request.oauth_config,

@@ -223,6 +223,7 @@ async def create_mcp_server(
     oauth_config: dict | None = None,
     api_key_header: str | None = None,
     operator=None,
+    share_config: dict | None = None,
 ) -> MCPServer:
     """创建并独立发布远程 MCP 配置。"""
     if slug in BUILTIN_MCP_SERVERS:
@@ -249,7 +250,9 @@ async def create_mcp_server(
         enabled=1,
         created_by=created_by,
         updated_by=created_by,
-        share_config=normalize_mcp_share_config(None, operator=operator) if operator is not None else None,
+        share_config=(
+            normalize_mcp_share_config(share_config, operator=operator) if operator is not None else None
+        ),
     )
     configure_mcp_auth(server, auth_mode, oauth_config, api_key_header)
     await save_mcp_server(db, server, new=True)
