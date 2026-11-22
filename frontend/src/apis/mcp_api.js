@@ -56,6 +56,18 @@ export const deleteMcpServer = async (name) => {
   return apiAdminDelete(`${BASE_URL}/${encodeURIComponent(name)}`)
 }
 
+/**
+ * 更新连接器共享范围
+ * @param {string} name - 服务器名称
+ * @param {Object} shareConfig - 共享配置
+ * @returns {Promise} - 更新结果
+ */
+export const updateMcpShareConfig = async (name, shareConfig) => {
+  return apiAdminPut(`${BASE_URL}/${encodeURIComponent(name)}/share-config`, {
+    share_config: shareConfig
+  })
+}
+
 // =============================================================================
 // === MCP 服务器操作 ===
 // =============================================================================
@@ -118,6 +130,7 @@ export const mcpApi = {
   deleteMcpServer,
   testMcpServer,
   updateMcpServerStatus,
+  updateMcpShareConfig,
   getMcpServerTools,
   toggleMcpServerTool
 }

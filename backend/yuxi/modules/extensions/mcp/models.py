@@ -46,6 +46,7 @@ class MCPServer(Base):
     # 状态字段
     enabled = Column(Integer, nullable=False, default=1, comment="是否启用：1=是，0=否")
     disabled_tools = Column(JSON, nullable=True, comment="禁用的工具名称列表")
+    share_config = Column(JSON, nullable=True, comment="共享范围（v2）；空按全平台可见处理")
 
     # 用户追踪
     created_by = Column(String(100), nullable=False, comment="创建人用户名")
@@ -72,6 +73,7 @@ class MCPServer(Base):
             "sse_read_timeout": self.sse_read_timeout,
             "enabled": bool(self.enabled),
             "disabled_tools": self.disabled_tools or [],
+            "share_config": self.share_config,
             "created_by": self.created_by,
             "updated_by": self.updated_by,
             "created_at": format_utc_datetime(self.created_at),

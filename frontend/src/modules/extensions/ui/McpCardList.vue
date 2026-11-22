@@ -16,7 +16,7 @@
             />
           </a-button>
         </a-tooltip>
-        <a-button v-if="userStore.isSuperAdmin" type="primary" @click="handleMcpAdd" class="lucide-icon-btn">
+        <a-button v-if="userStore.isAdmin" type="primary" @click="handleMcpAdd" class="lucide-icon-btn">
           <Plus :size="14" />
           <span>新增连接器</span>
         </a-button>
@@ -48,7 +48,7 @@
             :icon-color="getExtensionIconColor(server.slug, themeStore.isDark)"
             @click="handleCardClick(server)"
           >
-            <template v-if="server.can_manage" #actions>
+            <template v-if="server.can_manage && userStore.isSuperAdmin" #actions>
               <button
                 type="button"
                 class="mcp-enabled-action"
@@ -95,7 +95,7 @@
               </div>
             </div>
           </div>
-          <div v-if="previewServer.can_manage" class="mcp-basic-info-actions">
+          <div v-if="previewServer.can_manage && userStore.isSuperAdmin" class="mcp-basic-info-actions">
             <a-switch
               :checked="previewServer.enabled"
               :loading="isActionLoading(previewServer)"

@@ -176,7 +176,7 @@ async def test_fresh_business_schema_contains_input_lifecycle_without_request_ta
             "thread_id",
         } <= input_columns
         assert "conversation_thread_id" not in input_columns
-        assert BUSINESS_SCHEMA_VERSION == 2
+        assert BUSINESS_SCHEMA_VERSION == 3
         assert KNOWLEDGE_SCHEMA_VERSION == 2
     finally:
         await _drop_isolated_schema(schema, admin_engine, scoped_engine)
@@ -574,5 +574,37 @@ async def test_mcp_credential_upgrade_is_explicit_and_preserves_existing_data(ve
             )
             assert ("api_key_header" in columns) == (version == 1)
         assert (await get_schema_versions(manager))["business"] == (2 if version == 1 else 99)
+    finally:
+        await _drop_isolated_schema(schema, admin, engine)
+
+
+@pytest.mark.parametrize("version", [2, 99])
+async def test_mcp_share_config_upgrade_backfills_global_and_is_idempotent(version):
+    """真实 PostgreSQL 证明 v3 升级把存量连接器回填为全平台可见，未知版本在 DDL 前拒绝。"""
+    from yuxi.migrations.mcp_share_config import upgrade_mcp_share_config
+
+    schema, admin, engine, manager = await _create_isolated_manager("pytest_mcp_share_upgrade")
+    try:
+        await create_schema_version_table(manager)
+        await record_schema_version(manager, "business", version)
+        async with engine.begin() as conn:
+            await conn.execute(text("CREATE TABLE mcp_servers (slug TEXT PRIMARY KEY, headers JSONB)"))
+            await conn.execute(text("INSERT INTO mcp_servers VALUES ('existing', '{\"X-API-Key\":\"fixture-shared\"}')"))
+        if version == 99:
+            with pytest.raises(RuntimeError, match="business v2"):
+                await upgrade_mcp_share_config(manager)
+        else:
+            await upgrade_mcp_share_config(manager)
+            await upgrade_mcp_share_config(manager)
+            async with engine.connect() as conn:
+                assert await conn.scalar(text("SELECT share_config FROM mcp_servers WHERE slug='existing'")) == {
+                    "version": 2,
+                    "read_scope": {"access_level": "global", "department_ids": [], "user_uids": []},
+                    "manage_scope": None,
+                }
+                assert await conn.scalar(text("SELECT headers FROM mcp_servers WHERE slug='existing'")) == {
+                    "X-API-Key": "fixture-shared"
+                }
+        assert (await get_schema_versions(manager))["business"] == (3 if version == 2 else 99)
     finally:
         await _drop_isolated_schema(schema, admin, engine)

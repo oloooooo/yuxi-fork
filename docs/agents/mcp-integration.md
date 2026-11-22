@@ -1,8 +1,14 @@
 # 集成 MCP
 
-MCP（Model Context Protocol）让智能体调用外部服务提供的工具。超级管理员在“扩展 → 连接器”中维护服务目录；所有登录用户可以填写自己的 Token、API Key 或连接 OAuth 账号。Agent 可直接选择连接器，Skill 也可声明激活后加载的依赖。聊天输入框通过 @ 选择本人可用的连接器，发送后挂载到当前会话，后续轮次无需重复选择；Public 参数见[会话 API](../advanced/agents-public-api.md#创建与提交消息)。
+MCP（Model Context Protocol）让智能体调用外部服务提供的工具。管理员在“扩展 → 连接器”中维护服务目录，并按共享范围控制谁能使用；所有登录用户可以填写自己的 Token、API Key 或连接 OAuth 账号。Agent 可直接选择连接器，Skill 也可声明激活后加载的依赖。聊天输入框通过 @ 选择本人可用的连接器，发送后挂载到当前会话，后续轮次无需重复选择；Public 参数见[会话 API](../advanced/agents-public-api.md#创建与提交消息)。
 
 点击 连接器卡片打开简介与个人凭证。用户按管理员选择的方式填写凭证或完成授权；超级管理员在弹窗底部点击“管理连接器”维护服务配置。未配置个人凭证不影响普通聊天，运行时暂不提供相关工具；配置后重新发起请求即可使用。卡片图标按服务标识与名称匹配，颜色按稳定标识映射。
+
+### 共享范围
+
+创建者默认可管理自己创建的连接器，并决定它能被谁使用：超级管理员可选全平台、指定部门或指定用户；管理员只能选指定部门或指定用户，不能设为全平台；普通用户不能新建或修改连接器，只能使用被共享给自己的。创建时超级管理员默认全平台可见，管理员默认仅本人可见。
+
+共享范围只决定“谁能看到并绑定这个连接器”，不改变认证方式：共享请求头里的服务身份仍由所有人共用，个人凭证仍按本人填写。可见范围被撤销后，绑定它的 Agent 在下一轮运行时不再获得该连接器的工具，不会显式报错。除超级管理员外，地址与请求头在页面上脱敏显示，管理员也不能读取共享凭据。
 
 ## 选择接入方式
 
@@ -175,13 +181,14 @@ OAuth 元数据只能使用超管配置的 MCP 来源与授权服务器来源，
 ```bash
 docker compose --env-file .env.prod -f docker-compose.prod.yml --profile container stop api worker
 docker compose --env-file .env.prod -f docker-compose.prod.yml --profile container run --rm --no-deps app-init uv run --no-sync --no-dev python -m yuxi.migrations.mcp_personal_credentials
+docker compose --env-file .env.prod -f docker-compose.prod.yml --profile container run --rm --no-deps app-init uv run --no-sync --no-dev python -m yuxi.migrations.mcp_share_config
 docker compose --env-file .env.prod -f docker-compose.prod.yml --profile container up --no-deps --force-recreate --exit-code-from app-init app-init
 docker compose --env-file .env.prod -f docker-compose.prod.yml --profile container up -d --no-build
 ```
 
 每条命令成功后再执行下一条。开发环境可将上述命令的 `docker compose --env-file .env.prod -f docker-compose.prod.yml --profile container` 替换为 `docker compose`。升级后按[部署验证](../advanced/deployment.md#_4-验证部署)检查就绪状态，并确认已有 MCP 连接和个人凭证可用。
 
-升级只增加可空字段并登记业务 Schema v2，保留已有服务、共享请求头和个人 OAuth 凭证。空的新字段不改变旧 OAuth 配置修订。新库由 app-init 直接建立 v2；运行进程只检查版本，不自动修改结构。回退旧进程版本需显式处理 Schema 版本兼容。
+升级只增加可空字段并登记业务 Schema 版本，保留已有服务、共享请求头和个人 OAuth 凭证。MCP 共享范围字段让业务 Schema 升到 v3：先在旧版本按上一节的个人凭证迁移升到 v2，再执行 `python -m yuxi.migrations.mcp_share_config` 升到 v3，存量连接器按全平台可见回填，页面与运行时再按新范围生效。空的新字段不改变旧 OAuth 配置修订。新库由 app-init 直接建立最新版本；运行进程只检查版本，不自动修改结构。回退旧进程版本需显式处理 Schema 版本兼容。
 
 ## 内置远程 MCP
 

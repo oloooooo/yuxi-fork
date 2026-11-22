@@ -103,24 +103,24 @@ def test_get_mcp_servers_normal_user_is_stripped(monkeypatch):
             self.description = "test mcp description"
             self.transport = "streamable_http"
             self.url = "http://localhost:8000"
-            self.command = "python"
-            self.args = ["-m", "mcp"]
-            self.env = {"API_KEY": "secret"}
             self.headers = {"Auth": "Bearer secret"}
             self.enabled = 1
             self.auth_mode = "headers"
+            self.share_config = None
+            self.created_by = "admin"
 
         def to_dict(self):
             return {
+                "slug": self.slug,
                 "name": self.name,
                 "description": self.description,
                 "transport": self.transport,
                 "url": self.url,
-                "command": self.command,
-                "args": self.args,
-                "env": self.env,
                 "headers": self.headers,
                 "enabled": bool(self.enabled),
+                "auth_mode": self.auth_mode,
+                "share_config": self.share_config,
+                "created_by": self.created_by,
             }
 
     async def fake_get_all_mcp_servers(db):
@@ -145,8 +145,7 @@ def test_get_mcp_servers_normal_user_is_stripped(monkeypatch):
     assert resp_admin.status_code == 200
     data_admin = resp_admin.json()["data"][0]
     assert data_admin["url"] == "http://localhost:8000"
-    assert data_admin["command"] == "python"
-    assert data_admin["env"] == {"API_KEY": "secret"}
+    assert data_admin["headers"] == {"Auth": "Bearer secret"}
     assert resp_admin.json()["data"][1]["is_builtin"] is True
 
     # 2. 普通用户请求，敏感字段及一切非安全白名单字段应该被彻底脱敏
@@ -156,15 +155,14 @@ def test_get_mcp_servers_normal_user_is_stripped(monkeypatch):
     by_slug = {item["slug"]: item for item in resp_user.json()["data"]}
     data_user = by_slug["test-mcp"]
     assert "url" not in data_user
-    assert "command" not in data_user
-    assert "env" not in data_user
     assert "headers" not in data_user
-    assert "transport" not in data_user  # NOTE: 进一步验证连 transport 等配置层元数据也一并过滤
+    assert data_user["transport"] == "streamable_http"
     assert data_user["name"] == "test-mcp"
     assert data_user["description"] == "test mcp description"
     assert data_user["enabled"] is True
     assert data_user["available"] is True
     assert data_user["is_builtin"] is False
+    assert data_user["can_manage"] is False
     assert data_user["auth_mode"] == "headers"
     builtin = by_slug["knowledge"]
     assert builtin["is_builtin"] is True

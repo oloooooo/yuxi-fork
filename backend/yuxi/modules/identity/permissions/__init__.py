@@ -1,8 +1,10 @@
 """跨资源权限能力。"""
 
 from yuxi.modules.identity.permissions.resource_permission import (
+    ADMIN_ROLES,
     AGENT_PERMISSION_POLICY,
     KNOWLEDGE_BASE_PERMISSION_POLICY,
+    MCP_PERMISSION_POLICY,
     SKILL_PERMISSION_POLICY,
     ResourcePermission,
     ResourcePermissionDenied,
@@ -11,14 +13,17 @@ from yuxi.modules.identity.permissions.resource_permission import (
     require_resource_permission,
     resolve_agent_permission,
     resolve_knowledge_base_permission,
+    resolve_mcp_permission,
     resolve_resource_permission,
     resolve_skill_permission,
     scope_matches,
 )
 
 __all__ = [
+    "ADMIN_ROLES",
     "AGENT_PERMISSION_POLICY",
     "KNOWLEDGE_BASE_PERMISSION_POLICY",
+    "MCP_PERMISSION_POLICY",
     "SKILL_PERMISSION_POLICY",
     "ResourcePermission",
     "ResourcePermissionDenied",
@@ -27,6 +32,7 @@ __all__ = [
     "require_resource_permission",
     "resolve_agent_permission",
     "resolve_knowledge_base_permission",
+    "resolve_mcp_permission",
     "resolve_resource_permission",
     "resolve_skill_permission",
     "scope_matches",

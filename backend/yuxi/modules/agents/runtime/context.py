@@ -441,7 +441,7 @@ async def resolve_agent_resource_options(
     if "mcps" in fields_to_load:
         from yuxi.modules.extensions.mcp.service import get_enabled_mcp_servers
 
-        servers = await get_enabled_mcp_servers(db=db)
+        servers = await get_enabled_mcp_servers(db=db, user=user)
         options["mcps"] = [_resource_option(server.slug, server.name, server.description) for server in servers]
     if "skills" in fields_to_load:
         from yuxi.modules.extensions.skills.repository import SkillRepository

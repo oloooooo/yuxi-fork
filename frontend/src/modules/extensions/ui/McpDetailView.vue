@@ -32,6 +32,7 @@
             <span>测试</span>
           </a-button>
           <a-button
+            v-if="userStore.isSuperAdmin"
             type="text"
             aria-label="编辑连接器"
             @click="startEdit"
@@ -43,6 +44,7 @@
             <span>编辑</span>
           </a-button>
           <a-button
+            v-if="userStore.isSuperAdmin"
             type="text"
             :danger="server?.enabled !== false"
             :aria-label="`${actionLabel}连接器`"
@@ -54,7 +56,7 @@
             <Check v-else :size="14" />
             <span>{{ actionLabel }}</span>
           </a-button>
-          <a-button v-if="server && !server.is_builtin" type="text" danger
+          <a-button v-if="server && !server.is_builtin && server.can_manage" type="text" danger
             aria-label="删除连接器" @click="confirmDeleteServer(server)"
             class="lucide-icon-btn extension-detail-action">
             <Trash2 :size="14" /><span>删除</span>
@@ -102,6 +104,32 @@
               </div>
             </template>
           </dl>
+        </section>
+
+        <section
+          v-if="server && server.can_manage && !server.is_builtin"
+          class="mcp-info-section"
+          aria-label="共享范围"
+        >
+          <div class="extension-detail-section-header">
+            <div class="extension-detail-section-heading">
+              <h2>共享范围</h2>
+              <p>选择哪些用户可以在智能体中使用此连接器。</p>
+            </div>
+            <a-button v-if="!shareScopeReadonly" type="primary" :loading="shareSaving" @click="saveShareConfig">保存</a-button>
+          </div>
+          <a-alert
+            v-if="shareScopeReadonly"
+            type="info"
+            show-icon
+            message="当前为全平台共享，只有超级管理员可以调整。"
+          />
+          <ShareConfigForm
+            v-else
+            ref="shareConfigFormRef"
+            v-model="shareConfigForm"
+            :allowed-access-levels="server.allowed_access_levels || ['user']"
+          />
         </section>
 
         <section class="mcp-info-section mcp-maintenance-section" aria-label="维护信息">
@@ -234,13 +262,17 @@ import {
 } from '@lucide/vue'
 import McpFormModal from './McpFormModal.vue'
 import McpConnectionControls from './McpConnectionControls.vue'
+import ShareConfigForm from '@/modules/agents/ui/ShareConfigForm.vue'
+import { cloneShareConfig } from '@/modules/agents'
 import ExtensionDetailLayout from '@/shared/ui/ExtensionDetailLayout.vue'
+import { useUserStore } from '@/modules/identity'
 import { mcpApi } from '@/apis/mcp_api'
 import { mcpAuthLabel } from '@/modules/extensions/model/mcpOAuth'
 import { formatFullDateTime } from '@/shared/lib/time'
 
 const route = useRoute()
 const router = useRouter()
+const userStore = useUserStore()
 const slug = computed(() => decodeURIComponent(route.params.slug ?? route.params.name))
 
 const loading = ref(false)
@@ -260,6 +292,14 @@ const mcpDetailTabs = [
 ]
 
 const isEditing = ref(false)
+const shareConfigFormRef = ref(null)
+const shareSaving = ref(false)
+const shareConfigForm = ref({ version: 2, read_scope: null, manage_scope: null })
+// 管理员无权调整超管设定的全平台范围时，页面只展示说明，避免把 global 误显示成部门级
+const shareScopeReadonly = computed(() => {
+  const level = server.value?.share_config?.read_scope?.access_level
+  return Boolean(level) && !(server.value?.allowed_access_levels || []).includes(level)
+})
 const actionLabel = computed(() => {
   return server.value?.enabled === false ? '启用' : '停用'
 })
@@ -284,12 +324,39 @@ const startEdit = () => {
   if (server.value) isEditing.value = true
 }
 
+const saveShareConfig = async () => {
+  const validation = shareConfigFormRef.value?.validate?.()
+  if (validation && validation.valid === false) {
+    message.warning(validation.message || '请检查共享范围')
+    return
+  }
+  try {
+    shareSaving.value = true
+    const result = await mcpApi.updateMcpShareConfig(server.value.slug, shareConfigForm.value)
+    if (result.success) {
+      server.value = { ...server.value, ...result.data }
+      message.success('共享范围已更新')
+    } else {
+      message.error(result.message || '更新共享范围失败')
+    }
+  } catch (err) {
+    message.error(err.message || '更新共享范围失败')
+  } finally {
+    shareSaving.value = false
+  }
+}
+
 const fetchServer = async () => {
   try {
     loading.value = true
     const result = await mcpApi.getMcpServer(slug.value)
     if (result.success) {
       server.value = result.data
+      shareConfigForm.value = cloneShareConfig(result.data.share_config) || {
+        version: 2,
+        read_scope: null,
+        manage_scope: null
+      }
     } else {
       message.error(result.message || '获取连接器详情失败')
     }

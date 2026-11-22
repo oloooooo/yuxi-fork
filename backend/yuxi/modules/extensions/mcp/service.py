@@ -27,6 +27,12 @@ from yuxi.modules.extensions.mcp.runtime import (
     get_mcp_tools as load_mcp_tools,
 )
 
+from yuxi.modules.identity.permissions import (
+    ResourcePermission,
+    normalize_permission_config,
+    resolve_mcp_permission,
+)
+
 BUILTIN_MCP_SERVERS = BUILTIN_MCP_MANIFEST["mcpServers"]
 
 _SYNCED_MCP_FIELDS = (
@@ -43,6 +49,40 @@ _SYNCED_MCP_FIELDS = (
 
 class MCPServerNotFoundError(ValueError):
     """表示指定的 MCP 服务器不存在。"""
+
+
+def allowed_mcp_access_levels(user) -> list[str]:
+    """返回操作人可设定的连接器共享范围。"""
+    if user.role == "superadmin":
+        return ["global", "department", "user"]
+    if user.role == "admin":
+        return ["department", "user"]
+    return ["user"]
+
+
+def default_mcp_share_config(user) -> dict:
+    """新连接器默认范围：超管全平台，管理员仅本人。"""
+    scope = (
+        {"access_level": "global", "department_ids": [], "user_uids": []}
+        if user.role == "superadmin"
+        else {"access_level": "user", "department_ids": [], "user_uids": [user.uid]}
+    )
+    return {"version": 2, "read_scope": scope, "manage_scope": None}
+
+
+def normalize_mcp_share_config(share_config: dict | None, *, operator) -> dict:
+    """校验并标准化连接器共享范围，越权范围显式失败。"""
+    return normalize_permission_config(
+        share_config or default_mcp_share_config(operator),
+        allowed_access_levels=set(allowed_mcp_access_levels(operator)),
+        unauthorized_access_level_message="当前用户无权使用该连接器共享范围",
+        strict=True,
+    )
+
+
+def mcp_server_visible(user, server: MCPServer) -> bool:
+    """判断已启用的连接器是否对当前用户可读。"""
+    return bool(server.enabled) and resolve_mcp_permission(user, server) != ResourcePermission.NONE
 
 
 def is_builtin_mcp_server(server: MCPServer) -> bool:
@@ -85,6 +125,11 @@ async def ensure_builtin_mcp_servers_in_db() -> None:
                         enabled=1 if config.get("enabled") else 0,
                         created_by="system",
                         updated_by="system",
+                        share_config={
+                            "version": 2,
+                            "read_scope": {"access_level": "global", "department_ids": [], "user_uids": []},
+                            "manage_scope": None,
+                        },
                     )
                 )
                 any_changed = True
@@ -119,15 +164,20 @@ async def get_enabled_mcp_server_slugs(*, db: AsyncSession | None = None) -> lis
     return [server.slug for server in await get_enabled_mcp_servers(db=db)]
 
 
-async def get_enabled_mcp_servers(*, names: list[str] | None = None, db: AsyncSession | None = None) -> list[MCPServer]:
-    """统一读取可配置的启用服务；个人连接状态只在运行时解析。"""
+async def get_enabled_mcp_servers(
+    *, names: list[str] | None = None, db: AsyncSession | None = None, user=None
+) -> list[MCPServer]:
+    """统一读取可配置的启用服务；传入用户时只保留其可见范围。"""
     if db is None:
         from yuxi.infrastructure.postgres.manager import pg_manager
 
         async with pg_manager.get_async_session_context() as session:
-            return await get_enabled_mcp_servers(names=names, db=session)
+            return await get_enabled_mcp_servers(names=names, db=session, user=user)
 
-    return [server for server in await list_enabled_mcp_servers(db, names=names) if builtin_mcp_available(server.slug)]
+    servers = [server for server in await list_enabled_mcp_servers(db, names=names) if builtin_mcp_available(server.slug)]
+    if user is None:
+        return servers
+    return [server for server in servers if mcp_server_visible(user, server)]
 
 
 async def get_mcp_tools(
@@ -172,6 +222,7 @@ async def create_mcp_server(
     auth_mode: str = "headers",
     oauth_config: dict | None = None,
     api_key_header: str | None = None,
+    operator=None,
 ) -> MCPServer:
     """创建并独立发布远程 MCP 配置。"""
     if slug in BUILTIN_MCP_SERVERS:
@@ -198,12 +249,30 @@ async def create_mcp_server(
         enabled=1,
         created_by=created_by,
         updated_by=created_by,
+        share_config=normalize_mcp_share_config(None, operator=operator) if operator is not None else None,
     )
     configure_mcp_auth(server, auth_mode, oauth_config, api_key_header)
     await save_mcp_server(db, server, new=True)
     await db.commit()
     await db.refresh(server)
     logger.info(f"Created MCP server '{slug}'")
+    return server
+
+
+async def update_mcp_share_config(db: AsyncSession, slug: str, share_config: dict | None, *, operator) -> MCPServer:
+    """按操作人权限更新连接器共享范围，内置连接器由代码管理。"""
+    server = await get_mcp_server(db, slug, lock=True)
+    if not server:
+        raise MCPServerNotFoundError(f"Server '{slug}' does not exist")
+    if is_builtin_mcp_server(server):
+        raise PermissionError("系统内置连接器的共享范围由代码管理")
+    if resolve_mcp_permission(operator, server) != ResourcePermission.MANAGE:
+        raise PermissionError("仅管理员可修改连接器共享范围")
+    server.share_config = normalize_mcp_share_config(share_config, operator=operator)
+    server.updated_by = operator.username
+    await db.commit()
+    await db.refresh(server)
+    logger.info(f"Updated MCP share config '{slug}'")
     return server
 
 
@@ -431,17 +500,20 @@ def runtime_mcp_failure(exc: Exception) -> tuple[str, bool]:
 
 
 async def available_mcp_servers(db: AsyncSession, server_slugs, *, user_id: int) -> dict[str, MCPServer]:
-    """统一解析服务开关与本人的连接，返回可用服务且保留请求顺序。"""
+    """统一解析服务开关、可见范围与本人的连接，返回可用服务且保留请求顺序。"""
     from yuxi.modules.extensions.mcp.oauth_service import connection_status
-    from yuxi.modules.extensions.mcp.repository import runtime_mcp_servers
+    from yuxi.modules.extensions.mcp.repository import active_mcp_user, runtime_mcp_servers
 
     if not server_slugs:
         return {}
+    user = await active_mcp_user(db, user_id=user_id)
     rows = await runtime_mcp_servers(db, server_slugs, user_id)
     available = {
         server.slug: server
         for server, connection in rows
-        if builtin_mcp_available(server.slug) and server.enabled and connection_status(server, connection) in {"connected", "not_required"}
+        if mcp_server_visible(user, server)
+        and builtin_mcp_available(server.slug)
+        and connection_status(server, connection) in {"connected", "not_required"}
     }
     return {slug: available[slug] for slug in dict.fromkeys(server_slugs) if slug in available}
 

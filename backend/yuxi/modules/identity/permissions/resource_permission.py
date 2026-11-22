@@ -60,6 +60,7 @@ AGENT_PERMISSION_POLICY = ResourcePermissionPolicy(
     }
 )
 SKILL_PERMISSION_POLICY = AGENT_PERMISSION_POLICY
+MCP_PERMISSION_POLICY = AGENT_PERMISSION_POLICY
 
 
 def _normalize_scope(scope: dict | None) -> dict | None:
@@ -309,3 +310,15 @@ def resolve_skill_permission(user: Any, resource: ShareableResource) -> Resource
     if _value(resource, "source_type") == "builtin" and _value(user, "role") != "superadmin":
         return _minimum_permission(permission, ResourcePermission.READ)
     return permission
+
+
+def resolve_mcp_permission(user: Any, resource: ShareableResource) -> ResourcePermission:
+    """解析连接器权限：管理员治理全部连接器，其他用户按共享范围只读。"""
+    if _value(user, "is_deleted", 0):
+        return ResourcePermission.NONE
+    if _value(user, "role") in ADMIN_ROLES:
+        return ResourcePermission.MANAGE
+    if _value(resource, "share_config") is None:
+        # 未写共享范围的存量连接器保持全平台可读
+        return ResourcePermission.READ
+    return resolve_resource_permission(user, resource, MCP_PERMISSION_POLICY)

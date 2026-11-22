@@ -4,13 +4,14 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, StrictInt
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from yuxi.api.dependencies.auth import get_db, get_required_user, get_superadmin_user
+from yuxi.api.dependencies.auth import get_admin_user, get_db, get_required_user, get_superadmin_user
 from yuxi.api.routers.extensions.mcp_oauth import router as oauth_router
 from yuxi.infrastructure.observability.logging import logger
 from yuxi.modules.extensions.mcp.oauth_config import PERSONAL_AUTH_MODES, STATIC_AUTH_MODES, config_revision
 from yuxi.modules.extensions.mcp.repository import get_all_mcp_servers, get_mcp_server
 from yuxi.modules.extensions.mcp.service import (
     MCPServerNotFoundError,
+    allowed_mcp_access_levels,
     available_mcp_servers,
     create_mcp_server,
     delete_mcp_server,
@@ -22,8 +23,10 @@ from yuxi.modules.extensions.mcp.service import (
     set_server_enabled,
     toggle_tool_enabled,
     update_mcp_server,
+    update_mcp_share_config,
 )
 from yuxi.modules.identity.models import User
+from yuxi.modules.identity.permissions import ADMIN_ROLES, ResourcePermission, resolve_mcp_permission
 from yuxi.shared.errors import DomainError
 
 mcp = APIRouter(prefix="/system/mcp-servers", tags=["mcp"])
@@ -69,6 +72,10 @@ class UpdateMcpServerStatusRequest(BaseModel):
     enabled: bool = Field(..., description="是否启用")
 
 
+class ShareConfigPayload(BaseModel):
+    share_config: dict | None = Field(None, description="共享权限配置")
+
+
 # --- MCP 服务器 CRUD ---
 
 
@@ -82,35 +89,30 @@ async def get_mcp_servers(
         servers = await get_all_mcp_servers(db)
         states = await personal_connection_states(db, servers, current_user.id)
         available = await available_mcp_servers(db, [server.slug for server in servers], user_id=current_user.id)
-        if current_user.role == "superadmin":
+        if current_user.role in ADMIN_ROLES:
             return {
                 "success": True,
                 "data": [
-                    {**serialize_mcp_server(server), "connection_status": states[server.slug], "available": server.slug in available}
+                    {
+                        **serialize_mcp_server(server, current_user),
+                        "connection_status": states[server.slug],
+                        "available": server.slug in available,
+                    }
                     for server in servers
                 ],
             }
 
         data = []
         for server in servers:
+            if resolve_mcp_permission(current_user, server) == ResourcePermission.NONE:
+                continue
             if not server.enabled and states[server.slug] not in {"connected", "reconnect_required"}:
                 continue
             data.append(
                 {
-                    "slug": server.slug,
-                    "auth_mode": server.auth_mode,
-                    **(
-                        {"config_revision": config_revision(server), "api_key_header": server.api_key_header}
-                        if server.auth_mode in STATIC_AUTH_MODES
-                        else {}
-                    ),
+                    **serialize_mcp_server(server, current_user),
                     "connection_status": states[server.slug],
                     "available": server.slug in available,
-                    "can_manage": False,
-                    "name": getattr(server, "name", ""),
-                    "description": getattr(server, "description", None),
-                    "enabled": bool(getattr(server, "enabled", True)),
-                    "is_builtin": is_builtin_mcp_server(server),
                 }
             )
         return {"success": True, "data": data}
@@ -124,7 +126,7 @@ async def get_mcp_servers(
 @mcp.post("")
 async def create_mcp_server_route(
     request: CreateMcpServerRequest,
-    current_user: User = Depends(get_superadmin_user),
+    current_user: User = Depends(get_admin_user),
     db: AsyncSession = Depends(get_db),
 ):
     """创建新的 MCP 服务器"""
@@ -151,8 +153,9 @@ async def create_mcp_server_route(
             auth_mode=request.auth_mode,
             oauth_config=request.oauth_config,
             api_key_header=request.api_key_header,
+            operator=current_user,
         )
-        return {"success": True, "data": serialize_mcp_server(server)}
+        return {"success": True, "data": serialize_mcp_server(server, current_user)}
     except ValueError:
         raise HTTPException(status_code=400, detail="连接器配置无效，请检查地址、认证方式和必填字段")
     except HTTPException:
@@ -165,14 +168,19 @@ async def create_mcp_server_route(
 @mcp.get("/{slug}")
 async def get_mcp_server_route(
     slug: str,
-    current_user: User = Depends(get_superadmin_user),
+    current_user: User = Depends(get_required_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """获取单个 MCP 服务器配置"""
+    """获取单个 MCP 服务器配置（非超管脱敏）"""
     try:
         server = await get_server_or_404(db, slug)
+        if resolve_mcp_permission(current_user, server) == ResourcePermission.NONE:
+            raise HTTPException(status_code=403, detail="无权查看该连接器")
         states = await personal_connection_states(db, [server], current_user.id)
-        return {"success": True, "data": {**serialize_mcp_server(server), "connection_status": states[server.slug]}}
+        return {
+            "success": True,
+            "data": {**serialize_mcp_server(server, current_user), "connection_status": states[server.slug]},
+        }
     except HTTPException:
         raise
     except Exception as e:
@@ -208,7 +216,7 @@ async def update_mcp_server_route(
             oauth_config=request.oauth_config,
             api_key_header=request.api_key_header,
         )
-        return {"success": True, "data": serialize_mcp_server(server)}
+        return {"success": True, "data": serialize_mcp_server(server, current_user)}
     except HTTPException:
         raise
     except MCPServerNotFoundError as exc:
@@ -225,7 +233,7 @@ async def update_mcp_server_route(
 @mcp.delete("/{slug}")
 async def delete_mcp_server_route(
     slug: str,
-    current_user: User = Depends(get_superadmin_user),
+    current_user: User = Depends(get_admin_user),
     db: AsyncSession = Depends(get_db),
 ):
     """删除 MCP 服务器"""
@@ -233,6 +241,8 @@ async def delete_mcp_server_route(
         server = await get_mcp_server(db, slug)
         if server and is_builtin_mcp_server(server):
             raise HTTPException(status_code=403, detail="系统内置的连接器无法删除")
+        if server and resolve_mcp_permission(current_user, server) != ResourcePermission.MANAGE:
+            raise HTTPException(status_code=403, detail="无权删除该连接器")
 
         deleted = await delete_mcp_server(db, slug)
         if not deleted:
@@ -246,6 +256,30 @@ async def delete_mcp_server_route(
 
 
 # --- MCP 服务器操作 ---
+
+
+@mcp.put("/{slug}/share-config")
+async def update_mcp_share_config_route(
+    slug: str,
+    payload: ShareConfigPayload,
+    current_user: User = Depends(get_admin_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """更新连接器共享范围"""
+    try:
+        server = await update_mcp_share_config(db, slug, payload.share_config, operator=current_user)
+        return {"success": True, "data": serialize_mcp_server(server, current_user)}
+    except HTTPException:
+        raise
+    except MCPServerNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as e:
+        logger.error(f"Failed to update MCP share config: {e}")
+        raise HTTPException(status_code=500, detail="更新连接器共享范围失败")
 
 
 @mcp.post("/{slug}/test")
@@ -294,7 +328,7 @@ async def update_mcp_server_status_route(
         return {
             "success": True,
             "enabled": is_enabled,
-            "data": serialize_mcp_server(server),
+            "data": serialize_mcp_server(server, current_user),
             "message": f"连接器 '{slug}' 已{'添加' if is_enabled else '移除'}",
         }
     except MCPServerNotFoundError as exc:
@@ -314,12 +348,14 @@ async def update_mcp_server_status_route(
 @mcp.get("/{slug}/tools")
 async def get_mcp_server_tools(
     slug: str,
-    current_user: User = Depends(get_superadmin_user),
+    current_user: User = Depends(get_required_user),
     db: AsyncSession = Depends(get_db),
 ):
     """获取 MCP 服务器的工具列表"""
     try:
         server = await get_server_or_404(db, slug)
+        if resolve_mcp_permission(current_user, server) == ResourcePermission.NONE:
+            raise HTTPException(status_code=403, detail="无权查看该连接器")
         disabled_tools = server.disabled_tools or []
 
         try:
@@ -397,11 +433,15 @@ async def get_server_or_404(db: AsyncSession, slug: str):
     return server
 
 
-def serialize_mcp_server(server) -> dict:
-    """序列化 MCP，并补充代码内置标识。"""
+def serialize_mcp_server(server, current_user: User) -> dict:
+    """序列化 MCP，补充权限与内置标识；非超管不返回连接地址与共享请求头。"""
     data = server.to_dict()
+    if current_user.role != "superadmin":
+        data.pop("url", None)
+        data.pop("headers", None)
     if data.get("auth_mode") in STATIC_AUTH_MODES:
         data["config_revision"] = config_revision(server)
-    data["can_manage"] = True
+    data["can_manage"] = resolve_mcp_permission(current_user, server) == ResourcePermission.MANAGE
     data["is_builtin"] = is_builtin_mcp_server(server)
+    data["allowed_access_levels"] = allowed_mcp_access_levels(current_user)
     return data
