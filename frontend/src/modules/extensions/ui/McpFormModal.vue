@@ -99,6 +99,14 @@
         </div>
         <a-form-item label="授权范围" html-for="mcp-oauth-scopes"><a-input id="mcp-oauth-scopes" v-model:value="form.scopes" placeholder="空格分隔的 scopes" /></a-form-item>
       </template>
+      <a-form-item v-if="!editMode" label="共享范围" class="form-item">
+        <ShareConfigForm
+          v-model="form.shareConfig"
+          :allowed-access-levels="allowedAccessLevels"
+          :show-manage-scope="false"
+        />
+        <div class="mcp-share-hint">没拿到范围的用户看不到这个连接器，也不能在对话里用 @ 引用。</div>
+      </a-form-item>
       <div class="mcp-connection-options">
         <button
           type="button"
@@ -142,7 +150,14 @@ import { message } from 'ant-design-vue'
 import { ChevronRight, Plug } from '@lucide/vue'
 import { mcpApi } from '@/apis/mcp_api'
 import { parseMcpManifest } from '@/modules/extensions/model/mcpManifest'
+import ShareConfigForm from '@/modules/agents/ui/ShareConfigForm.vue'
+import { useUserStore } from '@/modules/identity'
 import CollapseTransition from '@/shared/ui/CollapseTransition.vue'
+
+const userStore = useUserStore()
+const allowedAccessLevels = computed(() =>
+  userStore.isSuperAdmin ? ['global', 'department', 'user'] : ['department', 'user']
+)
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -173,6 +188,15 @@ function createEmptyForm() {
     headersText: '',
     timeout: null,
     sse_read_timeout: null,
+    shareConfig: {
+      version: 2,
+      read_scope: {
+        access_level: userStore.isSuperAdmin ? 'global' : 'user',
+        department_ids: [],
+        user_uids: userStore.isSuperAdmin ? [] : [userStore.uid].filter(Boolean)
+      },
+      manage_scope: null
+    },
   }
 }
 
@@ -249,6 +273,17 @@ const handleFormSubmit = async () => {
       message.error('API Key 请求头名称不能为空')
       return
     }
+    if (!props.editMode) {
+      const scope = form.shareConfig?.read_scope
+      if (scope?.access_level === 'department' && !scope.department_ids?.length) {
+        message.error('请至少选择一个可访问部门')
+        return
+      }
+      if (scope?.access_level === 'user' && !scope.user_uids?.length) {
+        message.error('请至少选择一个可访问用户')
+        return
+      }
+    }
     const entry = {
       type: form.transport,
       url: form.url,
@@ -286,7 +321,7 @@ const handleFormSubmit = async () => {
         return
       }
     } else {
-      const result = await mcpApi.createMcpServer(data)
+      const result = await mcpApi.createMcpServer({ ...data, share_config: form.shareConfig })
       if (result.success) {
         submitted = result.data
         message.success('连接器创建成功')
@@ -340,6 +375,12 @@ const handleFormSubmit = async () => {
 
   :deep(.ant-input-number), :deep(.ant-select) { width: 100%; }
   :deep(.ant-form-item-label > label) { color: var(--gray-800); font-size: 13px; }
+}
+
+.mcp-share-hint {
+  margin-top: 4px;
+  color: var(--gray-500);
+  font-size: 12px;
 }
 
 .form-hint {

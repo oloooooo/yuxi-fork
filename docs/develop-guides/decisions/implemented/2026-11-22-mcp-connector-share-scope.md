@@ -46,4 +46,6 @@ Owner：backend/yuxi/modules/extensions/mcp/service.py
 - 部门共享：页面把范围设为“默认部门”，部门内用户可见；改为“旅游规划部门”后该用户列表不再出现该连接器，页面同步隐藏。
 - 撤销共享的运行时效果：真实对话验证——共享期间 worker 日志显示 `mcps=['bailian-websearch']` 且 `Initialized MCP client with servers: ['bailian-websearch']`；把 read_scope 改为只含另一用户后，同一 Agent 下一轮显示 `mcps=[]`，工具不再装配。
 - 发现并修正：`manage_scope` 在连接器场景是死配置（管理员无条件 MANAGE，普通用户被角色上限卡在 READ），保留开关等于承诺不存在的效果，故连接器页面隐藏该开关，仅保留读取权限；共享范围校验（manage 必须包含在 read 内）仍在后端生效。
+- 可见性回归：部门 1 的 Skill 补建出的连接器用部门 2 普通账号 `GET /api/system/mcp-servers` 看不到，部门 1 账号能看到；`admin` 建全局范围返回 400。
+- 创建即选范围（Playwright，超管）：弹窗显示“全局共享/部门共享/指定人”且无“管理权限”，选“部门共享 + 默认部门”后创建，API 回读 `read_scope={"access_level":"department","department_ids":[1]}`（截图 `.yuxi/playwright/mcpdept-01.png`、`mcpdept-02.png`）。
 - 未验证范围：`manage_scope` 对其他角色的实际治理效果（当前模型下无法构造“非管理员被授权管理”的用例）；`docker-compose` 的 frontend dev target 缺 CMD 的既有缺陷未修。
