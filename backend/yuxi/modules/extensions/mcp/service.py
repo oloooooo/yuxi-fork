@@ -362,6 +362,8 @@ async def release_skill_owned_mcp_servers(
         if await agent_repo.list_referencing_mcp(slug):
             continue
         server.enabled = 0
+        # 失去归属后回归公有；重装同名 Skill 只认领安装时新建的连接器。
+        server.origin_skill = None
         await save_mcp_server(db, server)
 
 

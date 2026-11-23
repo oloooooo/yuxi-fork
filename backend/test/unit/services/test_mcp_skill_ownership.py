@@ -205,6 +205,7 @@ async def test_release_disables_unreferenced_connector(monkeypatch, saved):
     )
 
     assert server.enabled == 0
+    assert server.origin_skill is None
 
 
 async def test_release_ignores_connector_owned_by_other_skill(monkeypatch, saved):

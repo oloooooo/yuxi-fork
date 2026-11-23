@@ -78,7 +78,7 @@
                     :key="getOptionValue(option)"
                     :value="getOptionValue(option)"
                   >
-                    {{ getOptionLabel(option) }}
+                    {{ formatOptionLabel(option, value.kind) }}
                   </a-select-option>
                 </a-select>
 
@@ -179,7 +179,7 @@
                         @click="!isReadOnlyConfig && toggleOption(key, getOptionValue(option))"
                       >
                         <div class="option-content">
-                          <span class="option-text">{{ getOptionLabel(option) }}</span>
+                          <span class="option-text">{{ formatOptionLabel(option, value.kind) }}</span>
                           <div class="option-indicator">
                             <Check
                               v-if="isOptionSelected(key, getOptionValue(option))"
@@ -318,7 +318,7 @@
           >
             <div class="selection-item-content">
               <div class="selection-item-header">
-                <span class="selection-item-name">{{ getOptionLabel(option) }}</span>
+                <span class="selection-item-name">{{ formatOptionLabel(option, currentConfigKind) }}</span>
 
                 <div class="selection-item-indicator">
                   <Check v-if="tempSelectedValues.includes(getOptionValue(option))" :size="16" />
@@ -463,6 +463,13 @@ const KNOWLEDGE_BASE_SKILL_SLUG = 'knowledge-base'
 const getSelectionOptions = (key, item) =>
   getAgentResourceSelectionOptions(key, item, agentConfig.value, configurableItems.value)
 
+/** 连接器选项显示「名称（标识）」，选中值仍是标识。 */
+const formatOptionLabel = (option, kind) => {
+  const label = getOptionLabel(option)
+  const value = getOptionValue(option)
+  return kind === 'mcps' && value && label !== value ? `${label}（${value}）` : label
+}
+
 const isEmptyConfig = computed(() => {
   return Object.keys(configurableItems.value).length === 0
 })
@@ -581,7 +588,7 @@ const filteredOptions = computed(() => {
 
   const search = selectionSearchText.value.toLowerCase()
   return options.filter((opt) => {
-    const label = String(getOptionLabel(opt)).toLowerCase()
+    const label = String(formatOptionLabel(opt, currentConfigKind.value)).toLowerCase()
     const desc = String(getOptionDescription(opt) || '').toLowerCase()
     return label.includes(search) || desc.includes(search)
   })
@@ -660,7 +667,7 @@ const clearSelection = (key) => {
 const getOptionLabelFromValue = (key, val) => {
   const options = getSelectionOptions(key, configurableItems.value[key])
   const option = options.find((opt) => getOptionValue(opt) === val)
-  return option ? getOptionLabel(option) : val
+  return option ? formatOptionLabel(option, configurableItems.value[key]?.kind) : val
 }
 
 const openSelectionModal = (key) => {

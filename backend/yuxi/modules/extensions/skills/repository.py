@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import cast, select
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from yuxi.modules.extensions.skills.models import Skill, SkillVersion
@@ -223,7 +224,8 @@ class SkillRepository:
 
     async def list_referencing_mcp(self, slug: str, *, exclude_id: int | None = None) -> list[Skill]:
         """返回声明了该 MCP 依赖的其它 Skill。"""
-        result = await self.db.execute(select(Skill))
-        return [
-            item for item in result.scalars().all() if item.id != exclude_id and slug in (item.mcp_dependencies or [])
-        ]
+        query = select(Skill).where(cast(Skill.mcp_dependencies, JSONB).contains([slug]))
+        if exclude_id is not None:
+            query = query.where(Skill.id != exclude_id)
+        result = await self.db.execute(query)
+        return list(result.scalars().all())

@@ -8,7 +8,7 @@
     :keyboard="!formLoading"
     :closable="!formLoading"
     :body-style="{ maxHeight: 'min(68dvh, 600px)', overflowY: 'auto', overflowX: 'hidden' }"
-    :ok-text="submitText || (editMode ? '保存' : '创建')"
+    :ok-text="editMode ? '保存' : '创建'"
     width="min(680px, calc(100vw - 32px))"
     centered
     class="mcp-form-modal"
@@ -23,13 +23,6 @@
       </div>
     </template>
     <a-form layout="vertical" class="extension-form mcp-form" :disabled="formLoading">
-      <a-alert
-        v-if="guidedHint"
-        class="mcp-guided-hint"
-        type="info"
-        show-icon
-        :message="guidedHint"
-      />
       <div class="mcp-form-grid">
         <a-form-item label="名称" html-for="mcp-form-name" required class="form-item">
           <a-input id="mcp-form-name" v-model:value="form.name" placeholder="如：文档搜索" />
@@ -39,9 +32,8 @@
             id="mcp-form-slug"
             v-model:value="form.slug"
             placeholder="如：docs-search"
-            :disabled="editMode || guided"
+            :disabled="editMode"
           />
-          <div v-if="guided" class="mcp-share-hint">需与 Skill 声明的依赖标识一致，不能修改。</div>
         </a-form-item>
       </div>
       <a-form-item label="描述" html-for="mcp-form-description" class="form-item">
@@ -172,11 +164,7 @@ const props = defineProps({
   open: { type: Boolean, default: false },
   editMode: { type: Boolean, default: false },
   editData: { type: Object, default: null },
-  initialData: { type: Object, default: null },
-  guided: { type: Boolean, default: false },
-  guidedHint: { type: String, default: '' },
-  initialShareConfig: { type: Object, default: null },
-  submitText: { type: String, default: '' }
+  initialData: { type: Object, default: null }
 })
 
 const emit = defineEmits(['update:open', 'submitted'])
@@ -250,8 +238,6 @@ watch(
       })
     } else if (val && !props.editData) {
       Object.assign(form, createEmptyForm(), props.initialData ? { slug: props.initialData.slug, name: props.initialData.name } : {})
-      if (props.guided) form.auth_mode = 'headers'
-      if (props.initialShareConfig) form.shareConfig = JSON.parse(JSON.stringify(props.initialShareConfig))
     }
   },
   { immediate: true }
@@ -396,10 +382,6 @@ const handleFormSubmit = async () => {
   margin-top: 4px;
   color: var(--gray-500);
   font-size: 12px;
-}
-
-.mcp-guided-hint {
-  margin-bottom: 12px;
 }
 
 .form-hint {

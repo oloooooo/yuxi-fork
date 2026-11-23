@@ -40,8 +40,7 @@
           <InfoCard
             v-for="server in group.servers"
             :key="server.slug"
-            :title="formatExtensionCardTitle(server.name)"
-            :subtitle="server.slug"
+            :title="formatMcpTitle(server)"
             :description="server.description || '暂无描述'"
             :tags="mcpCardTags(server)"
             :default-icon="getSkillIcon(`${server.slug} ${server.name}`, Plug)"
@@ -87,7 +86,7 @@
             </div>
             <div class="mcp-basic-info-title-text">
               <div class="mcp-basic-info-title">
-                {{ formatExtensionCardTitle(previewServer.name) }}
+                {{ formatMcpTitle(previewServer) }}
               </div>
               <div class="mcp-basic-info-meta">
                 <span>{{ mcpAuthLabel(previewServer.auth_mode) }} · {{ previewServer.enabled ? '已启用' : '已停用' }}</span>
@@ -151,6 +150,13 @@ const themeStore = useThemeStore()
 const router = useRouter()
 const route = useRoute()
 const userStore = useUserStore()
+
+/** 连接器展示统一为「名称（标识）」，避免同名连接器难以区分。 */
+const formatMcpTitle = (server) => {
+  const name = formatExtensionCardTitle(server?.name)
+  if (!name || name === server?.slug) return server?.slug || ''
+  return `${name}（${server.slug}）`
+}
 
 const loading = ref(false)
 const servers = ref([])

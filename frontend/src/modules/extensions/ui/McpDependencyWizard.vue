@@ -104,11 +104,12 @@ const savedForms = ref({})
 
 const current = computed(() => props.items[index.value] || {})
 const onSummary = computed(() => index.value >= props.items.length)
-const pendingCount = computed(() => results.value.filter((item) => item.status === 'pending').length)
+const totalCount = computed(() => props.items.length)
+const processedCount = computed(() => results.value.filter((item) => item.status !== 'pending').length)
 const progressLabel = computed(() =>
   onSummary.value
-    ? `已完成 ${results.value.length} 项`
-    : `待处理 ${pendingCount.value} / ${results.value.length} 项`
+    ? `已处理 ${processedCount.value} / ${totalCount.value} 项`
+    : `待处理 ${totalCount.value - processedCount.value} / ${totalCount.value} 项`
 )
 const hint = computed(() => {
   const owner = current.value.skillName

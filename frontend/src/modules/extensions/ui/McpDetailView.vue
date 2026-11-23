@@ -11,8 +11,8 @@
       <nav class="extension-detail-breadcrumb" aria-label="连接器详情导航">
         <button type="button" class="extension-detail-back" @click="goBack">连接器</button>
         <ChevronRight :size="15" aria-hidden="true" />
-        <span class="extension-detail-current" :title="server?.name || slug">
-          {{ server?.name || slug }}
+        <span class="extension-detail-current" :title="displayTitle">
+          {{ displayTitle }}
         </span>
       </nav>
     </template>
@@ -296,6 +296,10 @@ const slug = computed(() => decodeURIComponent(route.params.slug ?? route.params
 
 const loading = ref(false)
 const server = ref(null)
+/** 标题统一为「名称（标识）」，与卡片、智能体选择处一致。 */
+const displayTitle = computed(() =>
+  server.value?.name ? `${server.value.name}（${server.value.slug}）` : slug.value
+)
 const detailTab = ref('general')
 const testLoading = ref(null)
 

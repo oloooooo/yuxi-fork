@@ -155,7 +155,7 @@ Yuxi 的所有个人 OAuth MCP 共用发现、客户端注册、授权码、PKCE
 - MCP 工具仍会在执行处使用当前用户身份和服务器配置；
 - 管理员可以在 MCP 详情页单独禁用某个工具。
 
-共享 Skill 的 `mcp_dependencies` 声明所需服务器。Skill 激活后按需加载这些服务器的工具；预加载 Skill 从首轮加载，均无需在 Agent 的 MCP 字段重复选择。服务器必须由管理员启用，禁用的服务器不会提供工具。
+共享 Skill 的 `mcp_dependencies` 声明所需服务器。Skill 激活后按需加载这些服务器的工具；预加载 Skill 从首轮加载，均无需在 Agent 的 MCP 字段重复选择。服务器必须由管理员启用，禁用的服务器不会提供工具。仍被 Skill 或智能体引用的服务器不能删除，接口返回 409、错误码 `mcp_server_in_use` 并附依赖清单；删除 Skill 后其专有服务器的停用规则见[连接器归属与删除](./skills-management.md#连接器归属与删除)。
 
 MCP 配置从 PostgreSQL 读取。共享 headers 和个人凭证工具都在每次 Run 按需发现一次目录并在运行内复用，新 Run 重新发现。个人凭证每次出站重新读取当前用户的有效值。修改地址或授权配置后需要重新连接；停用服务、停用工具和断开个人连接都会阻止旧工具对象的后续调用。
 
@@ -174,21 +174,30 @@ OAuth 元数据只能使用超管配置的 MCP 来源与授权服务器来源，
 
 ## 已有部署升级个人凭证字段
 
-业务 Schema v2 包含 `api_key_header`。此升级入口只适用于已包含个人 OAuth 表的 0.8 business v1 数据库，不提供从 0.7.x 升级的能力。升级前停止新任务提交，等待活动任务结束，并保管数据库备份与部署加密密钥。
+业务 Schema v2 包含 `api_key_header`，v3 增加连接器共享范围，v4 增加连接器来源。此升级入口只适用于已包含个人 OAuth 表的 0.8 business v1 数据库，不提供从 0.7.x 升级的能力。升级前停止新任务提交，等待活动任务结束，并保管数据库备份与部署加密密钥。
 
-生产环境先构建或拉取目标版本镜像，确认 PostgreSQL 健康且 `storage-init` 已成功。停止 API/worker 后，使用目标镜像的一次性进程执行迁移，再运行应用初始化并启动服务；迁移不依赖能够启动的新版本 API：
+生产环境按以下顺序执行，每一步成功后再进行下一步：
+
+1. 构建或拉取目标版本镜像，确认 PostgreSQL 健康且 `storage-init` 已成功。
+2. 停止 API 与 worker，避免旧进程继续读写业务库。
+3. 用目标镜像的一次性进程依次执行三个迁移，顺序为个人凭证字段、共享范围、连接器来源。每个迁移只接受它的上一版本；已升到目标版本时重复执行为空操作，版本不符或初始化未完成会显式报错退出。
+4. 运行 `app-init`，完成应用初始化和内置定义同步。
+5. 启动服务。
+
+迁移不依赖能够启动的新版本 API，命令如下：
 
 ```bash
 docker compose --env-file .env.prod -f docker-compose.prod.yml --profile container stop api worker
 docker compose --env-file .env.prod -f docker-compose.prod.yml --profile container run --rm --no-deps app-init uv run --no-sync --no-dev python -m yuxi.migrations.mcp_personal_credentials
 docker compose --env-file .env.prod -f docker-compose.prod.yml --profile container run --rm --no-deps app-init uv run --no-sync --no-dev python -m yuxi.migrations.mcp_share_config
+docker compose --env-file .env.prod -f docker-compose.prod.yml --profile container run --rm --no-deps app-init uv run --no-sync --no-dev python -m yuxi.migrations.mcp_origin_skill
 docker compose --env-file .env.prod -f docker-compose.prod.yml --profile container up --no-deps --force-recreate --exit-code-from app-init app-init
 docker compose --env-file .env.prod -f docker-compose.prod.yml --profile container up -d --no-build
 ```
 
-每条命令成功后再执行下一条。开发环境可将上述命令的 `docker compose --env-file .env.prod -f docker-compose.prod.yml --profile container` 替换为 `docker compose`。升级后按[部署验证](../advanced/deployment.md#_4-验证部署)检查就绪状态，并确认已有 MCP 连接和个人凭证可用。
+开发环境可将上述命令的 `docker compose --env-file .env.prod -f docker-compose.prod.yml --profile container` 替换为 `docker compose`。升级后按[部署验证](../advanced/deployment.md#_4-验证部署)检查就绪状态，并确认已有 MCP 连接和个人凭证可用。
 
-升级只增加可空字段并登记业务 Schema 版本，保留已有服务、共享请求头和个人 OAuth 凭证。MCP 共享范围字段让业务 Schema 升到 v3：先在旧版本按上一节的个人凭证迁移升到 v2，再执行 `python -m yuxi.migrations.mcp_share_config` 升到 v3，存量连接器按全平台可见回填，页面与运行时再按新范围生效。连接器来源字段再升到 v4：继续执行 `python -m yuxi.migrations.mcp_origin_skill`，存量连接器保持“人工/公有”（来源为空）。空的新字段不改变旧 OAuth 配置修订。新库由 app-init 直接建立最新版本；运行进程只检查版本，不自动修改结构。回退旧进程版本需显式处理 Schema 版本兼容。
+升级只增加可空字段并登记业务 Schema 版本，保留已有服务、共享请求头和个人 OAuth 凭证。共享范围迁移把存量连接器按全平台可见回填，页面与运行时再按新范围生效；来源迁移让存量连接器保持“人工/公有”（来源为空）。空的新字段不改变旧 OAuth 配置修订。新库由 `app-init` 直接建到最新版本，不需要执行上述迁移命令；运行进程只检查版本，不自动修改结构。回退旧进程版本需显式处理 Schema 版本兼容。
 
 ## 内置远程 MCP
 
@@ -223,6 +232,8 @@ BUILTIN_MCP_MANIFEST = {
 | --- | --- | --- |
 | `GET` | `/api/system/mcp-servers` | 查看服务器；普通用户只得到脱敏基础信息 |
 | `POST` / `PUT` | `/api/system/mcp-servers`、`/{slug}` | 添加或修改远程 MCP |
+| `DELETE` | `/api/system/mcp-servers/{slug}` | 删除服务器；仍被 Skill 或智能体引用时返回 409 `mcp_server_in_use` 和依赖清单 |
+| `GET` | `/api/system/mcp-servers/{slug}/dependents` | 查看依赖该服务器的 Skill 与智能体；仅管理员可用，普通用户返回 403 |
 | `PUT` | `/api/system/mcp-servers/{slug}/status` | 启用或停用服务器（对应页面上的添加/移除状态） |
 | `PUT` | `/api/system/mcp-servers/{slug}/connection` | 用户保存或替换自己的 Token / API Key |
 | `DELETE` | `/api/system/mcp-servers/{slug}/connection` | 用户清除自己的个人凭证或断开 OAuth |

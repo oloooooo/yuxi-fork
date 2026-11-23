@@ -42,6 +42,7 @@ Skill 通过 `mcp_dependencies` 声明所需连接器，但连接器本身是全
 
 - 单元测试 `backend/test/unit/services/test_mcp_skill_ownership.py`：认领自己的新建连接器、未在本次新建列表则不标记、内置跳过、他人创建不标记、仍有其他 Skill 引用时保持启用、智能体引用不停用、无引用停用、归属他人时不被误停用。
 - 集成测试 `backend/test/integration/services/test_schema_migration_version.py`：v3→v4 幂等加列、未知版本在 DDL 前拒绝、业务 Schema 版本断言为 4。
-- 手工真实 HTTP 验证（不入库，`.yuxi/` 被忽略）：首次安装后 `origin_skill` 写入且启用；`/dependents` 返回依赖 Skill；重复安装得到 `-v2` 后删除首个 Skill 仍启用；删除 `-v2` 后停用。
-- 浏览器验证：连接器详情页显示“由 Skill「ui-depend-skill」引入”与“被 1 个 Skill、0 个智能体引用”，删除确认框附“删除后会影响：Skill「界面依赖测试」”。
-- 未覆盖：管理员（非超管）在 UI 补建连接器的整条路径、并发安装/删除、真实 HTTP 的 `created_mcp_slugs` 与 `/dependents` 权限回归仍需补集成测试。
+- 集成测试 `backend/test/integration/api/test_mcp_skill_ownership_api.py`：真实 HTTP 覆盖 `created_mcp_slugs` 归属落库、共享范围只同步专有连接器、删除被引用连接器返回 409 且依赖清单正确、`/dependents` 管理员 200 与普通用户 403、删除 Skill 后仍有其它引用则保持启用、独占连接器停用。
+- 手工真实 HTTP 验证（脚本不入库，`.yuxi/` 被忽略）：首次安装后 `origin_skill` 写入且启用；`/dependents` 返回依赖 Skill；重复安装得到 `-v2` 后删除首个 Skill 仍启用；删除 `-v2` 后停用并清空归属。
+- 浏览器验证：连接器详情页显示“由 Skill「ui-depend-skill」引入”与“被 1 个 Skill、0 个智能体引用”，删除确认框附“删除后会影响：Skill「界面依赖测试」”；卡列表展示“名称（slug）”，补建向导显示“待处理 1 / 1 项”、传输方式可选、跳过后汇总显示“已跳过”。
+- 未覆盖：管理员（非超管）在 UI 补建连接器并降级到本部门、并发安装/删除。
