@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import shutil
 from typing import Any
 
@@ -75,6 +76,8 @@ from yuxi.modules.extensions.skills.repository import SkillRepository
 from yuxi.modules.identity.models import User
 from yuxi.modules.identity.permissions.resource_permission import ADMIN_ROLES
 from yuxi.modules.identity.repositories.resource_grants import validate_shared_grants
+
+logger = logging.getLogger(__name__)
 
 
 async def get_skill_dependency_options(db: AsyncSession, user: User, slug: str | None = None) -> dict[str, list[str] | list[dict]]:
@@ -151,18 +154,33 @@ async def confirm_skill_install_draft(
             results.append(result)
 
     if installed:
-        from yuxi.modules.extensions.mcp.service import mark_skill_owned_mcp_servers
+        from yuxi.modules.extensions.mcp.service import (
+            mark_skill_owned_mcp_servers,
+            sync_mcp_share_config_for_skill,
+        )
 
         created = set(created_mcp_slugs or [])
-        for item in installed:
-            await mark_skill_owned_mcp_servers(
-                db,
-                slugs=list(item.mcp_dependencies or []),
-                claimed_slugs=created,
-                skill_slug=item.slug,
-                operator=operator,
-            )
-        await db.commit()
+        try:
+            for item in installed:
+                await mark_skill_owned_mcp_servers(
+                    db,
+                    slugs=list(item.mcp_dependencies or []),
+                    claimed_slugs=created,
+                    skill_slug=item.slug,
+                    operator=operator,
+                )
+                await sync_mcp_share_config_for_skill(
+                    db,
+                    slugs=list(item.mcp_dependencies or []),
+                    skill_slug=item.slug,
+                    share_config=item.share_config,
+                    operator=operator,
+                )
+            await db.commit()
+        except Exception:
+            # 归属标记失败只降级为「公有」，不影响已安装结果与草稿消费。
+            await db.rollback()
+            logger.exception("Failed to mark skill-owned MCP servers")
 
     consume_installed_draft_items(draft_dir, data, {item["requested_slug"] for item in results if item["success"]})
     return results
@@ -187,7 +205,9 @@ async def delete_skill(db: AsyncSession, *, slug: str, operator: User) -> None:
     await invalidate_skill_projections(db, slug)
     from yuxi.modules.extensions.mcp.service import release_skill_owned_mcp_servers
 
-    await release_skill_owned_mcp_servers(db, mcp_slugs=list(item.mcp_dependencies or []), skill_id=item.id)
+    await release_skill_owned_mcp_servers(
+        db, mcp_slugs=list(item.mcp_dependencies or []), skill_slug=slug, skill_id=item.id
+    )
     await repo.delete(item)
     await db.commit()
     # 只删除提交前已定位的内容目录，后续同 slug 安装的新目录不属于本次删除。
@@ -239,6 +259,7 @@ async def update_skill_share_config(
     await sync_mcp_share_config_for_skill(
         db,
         slugs=list(item.mcp_dependencies or []),
+        skill_slug=slug,
         share_config=normalized,
         operator=operator,
     )

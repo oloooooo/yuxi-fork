@@ -193,10 +193,6 @@ def _isolated_skill_storage(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     monkeypatch.setattr(svc, "get_enabled_mcp_server_slugs", no_mcps)
     monkeypatch.setattr("yuxi.modules.extensions.mcp.service.get_enabled_mcp_server_slugs", no_mcps)
 
-    async def no_owned_mcps(*, db, skill_slug):
-        return []
-
-    monkeypatch.setattr("yuxi.modules.extensions.mcp.service.get_skill_owned_mcp_server_slugs", no_owned_mcps)
 
 
 def test_allowed_skill_access_levels_by_role():

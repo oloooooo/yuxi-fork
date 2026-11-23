@@ -194,10 +194,10 @@ async def get_mcp_server_route(
 @mcp.get("/{slug}/dependents")
 async def get_mcp_server_dependents_route(
     slug: str,
-    current_user: User = Depends(get_required_user),
+    current_user: User = Depends(get_admin_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """列出依赖该连接器的 Skill 与智能体（只读提示）。"""
+    """列出依赖该连接器的 Skill 与智能体；含他人私有智能体名称，仅管理员可见。"""
     server = await get_server_or_404(db, slug)
     if resolve_mcp_permission(current_user, server) == ResourcePermission.NONE:
         raise HTTPException(status_code=403, detail="无权查看该连接器")

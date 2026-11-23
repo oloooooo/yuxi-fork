@@ -43,6 +43,12 @@
           <a-input :value="current.slug" disabled />
           <div class="wizard-hint">需与 Skill 声明的依赖标识一致，不能修改。</div>
         </a-form-item>
+        <a-form-item label="传输方式">
+          <a-select v-model:value="form.transport" :disabled="busy">
+            <a-select-option value="streamable_http">Streamable HTTP</a-select-option>
+            <a-select-option value="sse">SSE</a-select-option>
+          </a-select>
+        </a-form-item>
         <a-form-item label="服务地址" required>
           <a-input v-model:value="form.url" placeholder="https://example.com/mcp" :disabled="busy" />
         </a-form-item>
@@ -136,6 +142,7 @@ const formFor = (item) => {
   if (savedForms.value[item.slug]) return JSON.parse(JSON.stringify(savedForms.value[item.slug]))
   return {
     name: item.name || item.slug,
+    transport: 'streamable_http',
     url: '',
     token: '',
     description: '',
@@ -191,7 +198,7 @@ const createAndNext = async () => {
     await mcpApi.createMcpServer({
       slug: current.value.slug,
       name: form.value.name.trim(),
-      transport: 'streamable_http',
+      transport: form.value.transport,
       url: form.value.url.trim(),
       description: form.value.description?.trim() || undefined,
       auth_mode: form.value.token ? 'headers' : 'none',

@@ -75,9 +75,25 @@ async def test_mark_skips_connectors_created_by_others(saved):
     assert saved["alpha"].origin_skill is None
 
 
-async def test_mark_enables_own_connector_and_reuses_existing_origin(saved):
-    """自己的连接器被标记并启用，重装同 slug 时恢复启用（不在本次新建列表也生效）。"""
-    saved["alpha"] = _server("alpha", origin_skill="travel")
+async def test_mark_claims_own_new_connector(saved):
+    """本次新建且属于自己的连接器被认领（不改启用状态）。"""
+    saved["alpha"] = _server("alpha", enabled=1)
+
+    await mcp_service.mark_skill_owned_mcp_servers(
+        FakeSession([]),
+        slugs=["alpha"],
+        claimed_slugs={"alpha"},
+        skill_slug="travel",
+        operator=SimpleNamespace(username="admin"),
+    )
+
+    assert saved["alpha"].origin_skill == "travel"
+    assert saved["alpha"].enabled == 1
+
+
+async def test_mark_skips_connector_not_claimed(saved):
+    """未在本次新建列表里的连接器即使是自己建的也不认领。"""
+    saved["alpha"] = _server("alpha", enabled=1)
 
     await mcp_service.mark_skill_owned_mcp_servers(
         FakeSession([]),
@@ -87,8 +103,23 @@ async def test_mark_enables_own_connector_and_reuses_existing_origin(saved):
         operator=SimpleNamespace(username="admin"),
     )
 
-    assert saved["alpha"].origin_skill == "travel"
-    assert saved["alpha"].enabled == 1
+    assert saved["alpha"].origin_skill is None
+
+
+async def test_mark_skips_builtin_connector(monkeypatch, saved):
+    """内置连接器永不被 Skill 认领。"""
+    saved["knowledge"] = _server("knowledge", enabled=1)
+    monkeypatch.setattr(mcp_service, "is_builtin_mcp_server", lambda _server: True)
+
+    await mcp_service.mark_skill_owned_mcp_servers(
+        FakeSession([]),
+        slugs=["knowledge"],
+        claimed_slugs={"knowledge"},
+        skill_slug="travel",
+        operator=SimpleNamespace(username="admin"),
+    )
+
+    assert saved["knowledge"].origin_skill is None
 
 
 async def test_release_keeps_connector_referenced_by_other_skill(monkeypatch, saved):
@@ -115,7 +146,9 @@ async def test_release_keeps_connector_referenced_by_other_skill(monkeypatch, sa
     monkeypatch.setattr("yuxi.modules.agents.repositories.definitions.AgentRepository", FakeAgentRepo)
     monkeypatch.setattr(mcp_service, "save_mcp_server", _noop_save)
 
-    await mcp_service.release_skill_owned_mcp_servers(FakeSession([server]), mcp_slugs=["alpha"], skill_id=1)
+    await mcp_service.release_skill_owned_mcp_servers(
+        FakeSession([server]), mcp_slugs=["alpha"], skill_slug="travel", skill_id=1
+    )
 
     assert server.origin_skill == "travel"
     assert server.enabled == 1
@@ -144,7 +177,9 @@ async def test_release_keeps_connector_used_by_agent(monkeypatch, saved):
     monkeypatch.setattr("yuxi.modules.agents.repositories.definitions.AgentRepository", FakeAgentRepo)
     monkeypatch.setattr(mcp_service, "save_mcp_server", _noop_save)
 
-    await mcp_service.release_skill_owned_mcp_servers(FakeSession([server]), mcp_slugs=["alpha"], skill_id=1)
+    await mcp_service.release_skill_owned_mcp_servers(
+        FakeSession([server]), mcp_slugs=["alpha"], skill_slug="travel", skill_id=1
+    )
 
     assert server.enabled == 1
 
@@ -165,9 +200,35 @@ async def test_release_disables_unreferenced_connector(monkeypatch, saved):
     monkeypatch.setattr("yuxi.modules.agents.repositories.definitions.AgentRepository", EmptyRepo)
     monkeypatch.setattr(mcp_service, "save_mcp_server", _noop_save)
 
-    await mcp_service.release_skill_owned_mcp_servers(FakeSession([server]), mcp_slugs=["alpha"], skill_id=1)
+    await mcp_service.release_skill_owned_mcp_servers(
+        FakeSession([server]), mcp_slugs=["alpha"], skill_slug="travel", skill_id=1
+    )
 
     assert server.enabled == 0
+
+
+async def test_release_ignores_connector_owned_by_other_skill(monkeypatch, saved):
+    """删除 A 不得停用归属 B 的连接器。"""
+    server = _server("alpha", origin_skill="other-skill", enabled=1)
+    saved["alpha"] = server
+
+    class EmptyRepo:
+        def __init__(self, _db):
+            pass
+
+        async def list_referencing_mcp(self, slug, *, exclude_id=None):
+            return []
+
+    monkeypatch.setattr("yuxi.modules.extensions.skills.repository.SkillRepository", EmptyRepo)
+    monkeypatch.setattr("yuxi.modules.agents.repositories.definitions.AgentRepository", EmptyRepo)
+    monkeypatch.setattr(mcp_service, "save_mcp_server", _noop_save)
+
+    await mcp_service.release_skill_owned_mcp_servers(
+        FakeSession([server]), mcp_slugs=["alpha"], skill_slug="travel", skill_id=1
+    )
+
+    assert server.enabled == 1
+    assert server.origin_skill == "other-skill"
 
 
 async def _noop_save(_db, _server, *, new=False):

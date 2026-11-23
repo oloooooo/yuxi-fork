@@ -77,7 +77,7 @@ async def validate_skill_dependencies(
     skills = normalize_string_list(skill_dependencies)
 
     # 验证所有工具（不仅仅是 builtin）
-    from yuxi.modules.extensions.mcp.service import get_enabled_mcp_server_slugs, get_skill_owned_mcp_server_slugs
+    from yuxi.modules.extensions.mcp.service import get_enabled_mcp_server_slugs
     from yuxi.modules.extensions.tools.catalog import get_tool_metadata
 
     available_tools = {tool["slug"] for tool in get_tool_metadata()}
@@ -85,9 +85,7 @@ async def validate_skill_dependencies(
     if invalid_tools:
         raise ValueError(f"存在无效工具依赖: {', '.join(invalid_tools)}")
 
-    available_mcps = set(await get_enabled_mcp_server_slugs(db=db)) | set(
-        await get_skill_owned_mcp_server_slugs(db=db, skill_slug=parent.slug)
-    )
+    available_mcps = set(await get_enabled_mcp_server_slugs(db=db))
     invalid_mcps = [name for name in mcps if name not in available_mcps]
     if invalid_mcps:
         raise MissingMcpDependencies(invalid_mcps)

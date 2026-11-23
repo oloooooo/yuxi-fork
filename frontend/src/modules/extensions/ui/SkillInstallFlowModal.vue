@@ -696,6 +696,8 @@ watch(
     reviewItems.value = []
     installItems.value = []
     installTarget.value = props.target || 'personal'
+    wizardAutoShown.value = false
+    createdMcpSlugs.value = []
 
     if (props.flow.kind === 'suite') {
       phase.value = 'selecting'
