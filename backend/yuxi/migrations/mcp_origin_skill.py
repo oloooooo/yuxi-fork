@@ -18,7 +18,8 @@ async def upgrade_mcp_origin_skill(manager: PostgresManager) -> None:
                 column = await conn.execute(
                     text(
                         "SELECT 1 FROM information_schema.columns "
-                        "WHERE table_name = 'mcp_servers' AND column_name = 'origin_skill'"
+                        "WHERE table_schema = current_schema() "
+                        "AND table_name = 'mcp_servers' AND column_name = 'origin_skill'"
                     )
                 )
                 if column.first() is None:

@@ -52,7 +52,7 @@
         <a-form-item label="服务地址" required>
           <a-input v-model:value="form.url" placeholder="https://example.com/mcp" :disabled="busy" />
         </a-form-item>
-        <a-form-item label="访问令牌（选填）">
+        <a-form-item label="访问令牌（选填）" extra="仅支持 Bearer 令牌或无认证；API Key、OAuth 连接器请先在连接器页创建。">
           <a-input-password
             v-model:value="form.token"
             placeholder="留空表示无需认证"
@@ -87,7 +87,6 @@ import { resolveApiErrorMessage } from '@/apis/base'
 const props = defineProps({
   open: { type: Boolean, default: false },
   items: { type: Array, default: () => [] },
-  allowedAccessLevels: { type: Array, default: () => ['user'] },
   initialShareConfig: { type: Object, default: null }
 })
 const emit = defineEmits(['update:open', 'finished'])

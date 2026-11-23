@@ -163,8 +163,7 @@ const allowedAccessLevels = computed(() =>
 const props = defineProps({
   open: { type: Boolean, default: false },
   editMode: { type: Boolean, default: false },
-  editData: { type: Object, default: null },
-  initialData: { type: Object, default: null }
+  editData: { type: Object, default: null }
 })
 
 const emit = defineEmits(['update:open', 'submitted'])
@@ -216,8 +215,8 @@ watch(() => form.auth_mode, (mode, previous) => {
 }, { flush: 'sync' })
 
 watch(
-  [() => props.open, () => props.initialData?.slug],
-  ([val]) => {
+  () => props.open,
+  (val) => {
     if (val) connectionOptionsOpen.value = props.editMode
     if (val && props.editData) {
       Object.assign(form, {
@@ -237,7 +236,7 @@ watch(
         sse_read_timeout: props.editData.sse_read_timeout,
       })
     } else if (val && !props.editData) {
-      Object.assign(form, createEmptyForm(), props.initialData ? { slug: props.initialData.slug, name: props.initialData.name } : {})
+      Object.assign(form, createEmptyForm())
     }
   },
   { immediate: true }

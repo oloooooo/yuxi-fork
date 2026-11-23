@@ -231,7 +231,6 @@
     <McpDependencyWizard
       v-model:open="mcpWizardVisible"
       :items="mcpWizardItems"
-      :allowed-access-levels="allowedAccessLevels"
       :initial-share-config="mcpInitialShareConfig"
       @finished="handleWizardFinished"
     />
@@ -264,6 +263,7 @@ const selectedSlugs = ref([])
 const progressItems = ref([])
 const drafts = ref([])
 const reviewItems = ref([])
+const retrySlugs = ref(new Set())
 const installItems = ref([])
 const shareConfig = ref({
   version: 2,
@@ -528,19 +528,27 @@ const installDrafts = async () => {
 
   phase.value = 'installing'
   flowError.value = ''
-  installItems.value = reviewItems.value.map((item) => ({
-    ...item,
-    status: item.success === false ? 'failed' : 'waiting',
-    error: item.success === false ? item.error || '' : ''
-  }))
+  const retry = retrySlugs.value
+  installItems.value = reviewItems.value.map((item) =>
+    retry.size && !retry.has(item.slug)
+      ? { ...item }
+      : {
+          ...item,
+          status: item.success === false ? 'failed' : 'waiting',
+          error: item.success === false ? item.error || '' : ''
+        }
+  )
   try {
     for (const draft of drafts.value) {
       const slugs = readyItems.value
         .filter((item) => item.draft_id === draft.draft_id)
+        .filter((item) => !retry.size || retry.has(item.slug))
         .map((item) => item.slug)
       if (!slugs.length) {
-        await skillApi.discardSkillInstallDraft(draft.draft_id)
-        forgetDraft(draft.draft_id)
+        if (!retry.size) {
+          await skillApi.discardSkillInstallDraft(draft.draft_id)
+          forgetDraft(draft.draft_id)
+        }
         continue
       }
 
@@ -568,6 +576,7 @@ const installDrafts = async () => {
       .filter((item) => item.status === 'waiting')
       .forEach((item) => Object.assign(item, { status: 'failed', error: flowError.value }))
   } finally {
+    retrySlugs.value = new Set()
     phase.value = 'result'
     if (missingMcpSlugs.value.length && !wizardAutoShown.value) {
       wizardAutoShown.value = true
@@ -651,11 +660,11 @@ const retryFailedItems = async () => {
       )
   )
   if (retryableItems.length) {
+    // 只重试失败项，已成功的项保留在结果里，避免成功数被覆盖。
+    retrySlugs.value = new Set(retryableItems.map((item) => item.slug))
     reviewItems.value = [
-      ...failedInstallItems.value
-        .filter((item) => !retryableItems.includes(item))
-        .map((item) => ({ ...item, success: false })),
-      ...retryableItems.map((item) => ({ ...item, success: true }))
+      ...installItems.value.filter((item) => item.status === 'success'),
+      ...failedInstallItems.value.map((item) => ({ ...item, success: false }))
     ]
     flowError.value = ''
     await installDrafts()

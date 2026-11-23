@@ -11,12 +11,20 @@ from pydantic import BaseModel, ConfigDict, Field, StrictStr, ValidationError
 from yuxi.api.dependencies.auth import get_db, get_required_user
 from yuxi.modules.extensions.mcp.oauth_config import redirect_uri
 from yuxi.modules.extensions.mcp.oauth_service import MCPOAuthService
+from yuxi.modules.extensions.mcp.repository import get_mcp_server
+from yuxi.modules.identity.permissions import ResourcePermission, resolve_mcp_permission
 from yuxi.shared.errors import DomainError
 
 router = APIRouter()
 COOKIE = "yuxi_mcp_browser"
 NO_STORE = {"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"}
 
+
+async def _ensure_server_visible(db, slug: str, user) -> None:
+    """个人凭证入口与列表保持同一可见性，不可见按不存在处理。"""
+    server = await get_mcp_server(db, slug)
+    if not server or resolve_mcp_permission(user, server) == ResourcePermission.NONE:
+        raise HTTPException(status_code=404, detail=f"服务器 '{slug}' 不存在")
 
 class CompleteMCPAuthorization(BaseModel):
     """一次性授权结果，不能包含目标用户。"""
@@ -41,6 +49,7 @@ async def save_credentials(slug: str, request: Request, response: Response, user
         body = SaveMCPCredentials.model_validate(await request.json())
     except (ValueError, ValidationError):
         raise HTTPException(status_code=422, detail="凭证格式无效，请填写原始 Token 或 API Key 并重新打开过期表单") from None
+    await _ensure_server_visible(db, slug, user)
     status = await MCPOAuthService(db).save_credentials(slug, user.id, body.secret, body.config_revision)
     response.headers.update(NO_STORE)
     return {"success": True, "connection_status": status}
@@ -74,6 +83,7 @@ async def connect(slug: str, request: Request, response: Response, user=Depends(
     browser = request.cookies.get(COOKIE, "")
     if not re.fullmatch(r"[A-Za-z0-9_-]{43}", browser):
         browser = secrets.token_urlsafe(32)
+    await _ensure_server_visible(db, slug, user)
     url = await MCPOAuthService(db).start(slug, user.id, browser)
     response.headers.update(NO_STORE)
     response.set_cookie(

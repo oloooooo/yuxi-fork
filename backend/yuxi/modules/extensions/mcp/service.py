@@ -61,9 +61,10 @@ class MCPServerInUseError(ValueError):
 
 def allowed_mcp_access_levels(user) -> list[str]:
     """返回操作人可设定的连接器共享范围。"""
-    if user.role == "superadmin":
+    role = getattr(user, "role", None)
+    if role == "superadmin":
         return ["global", "department", "user"]
-    if user.role == "admin":
+    if role == "admin":
         return ["department", "user"]
     return ["user"]
 
@@ -72,7 +73,7 @@ def default_mcp_share_config(user) -> dict:
     """新连接器默认范围：超管全平台，管理员仅本人。"""
     scope = (
         {"access_level": "global", "department_ids": [], "user_uids": []}
-        if user.role == "superadmin"
+        if getattr(user, "role", None) == "superadmin"
         else {"access_level": "user", "department_ids": [], "user_uids": [user.uid]}
     )
     return {"version": 2, "read_scope": scope, "manage_scope": None}
@@ -279,7 +280,10 @@ async def update_mcp_share_config(db: AsyncSession, slug: str, share_config: dic
         raise PermissionError("系统内置连接器的共享范围由代码管理")
     if resolve_mcp_permission(operator, server) != ResourcePermission.MANAGE:
         raise PermissionError("仅管理员可修改连接器共享范围")
-    server.share_config = normalize_mcp_share_config(share_config, operator=operator)
+    normalized = normalize_mcp_share_config(share_config, operator=operator)
+    if normalized is not None:
+        normalized["manage_scope"] = None
+    server.share_config = normalized
     server.updated_by = operator.username
     await db.commit()
     await db.refresh(server)
@@ -357,9 +361,9 @@ async def release_skill_owned_mcp_servers(
         server = await get_mcp_server(db, slug, lock=True)
         if not server or is_builtin_mcp_server(server) or server.origin_skill != skill_slug:
             continue
-        if await skill_repo.list_referencing_mcp(slug, exclude_id=skill_id):
-            continue
-        if await agent_repo.list_referencing_mcp(slug):
+        if await skill_repo.list_referencing_mcp(slug, exclude_id=skill_id) or await agent_repo.list_referencing_mcp(slug):
+            server.origin_skill = None
+            await save_mcp_server(db, server)
             continue
         server.enabled = 0
         # 失去归属后回归公有；重装同名 Skill 只认领安装时新建的连接器。
@@ -423,7 +427,7 @@ async def update_mcp_server(
 
 async def delete_mcp_server(db: AsyncSession, slug: str) -> bool:
     """删除 MCP 服务器；内置或仍被 Skill/智能体引用时拒绝。"""
-    server = await get_mcp_server(db, slug)
+    server = await get_mcp_server(db, slug, lock=True)
     if not server:
         return False
     if is_builtin_mcp_server(server):

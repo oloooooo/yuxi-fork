@@ -21,6 +21,7 @@
       <div class="extension-detail-actions">
         <a-space :size="8">
           <a-button
+            v-if="userStore.isSuperAdmin"
             type="text"
             :aria-label="testLoading ? '正在测试连接器' : '测试连接器'"
             @click="handleTestServer"
@@ -210,6 +211,7 @@
                 </div>
                 <div class="tool-actions">
                   <a-switch
+                    v-if="userStore.isSuperAdmin"
                     :checked="tool.enabled"
                     :aria-label="`${tool.name} ${tool.enabled ? '已启用' : '已禁用'}`"
                     @change="handleToggleTool(tool)"
@@ -517,7 +519,7 @@ watch(detailTab, (tab) => {
 
 onMounted(() => {
   fetchServer()
-  fetchDependents()
+  if (userStore.isAdmin) fetchDependents()
 })
 </script>
 

@@ -610,6 +610,40 @@ async def test_mcp_share_config_upgrade_backfills_global_and_is_idempotent(versi
         await _drop_isolated_schema(schema, admin, engine)
 
 
+@pytest.mark.parametrize("version", [2, 3])
+async def test_mcp_share_config_upgrade_rejects_half_upgraded_schema(version):
+    """版本号已到 v3 但列缺失时拒绝早退，v2 正常补列。"""
+    from yuxi.migrations.mcp_share_config import upgrade_mcp_share_config
+
+    schema, admin, engine, manager = await _create_isolated_manager("pytest_mcp_share_upgrade")
+    try:
+        await create_schema_version_table(manager)
+        await record_schema_version(manager, "business", version)
+        async with engine.begin() as conn:
+            await conn.execute(text("CREATE TABLE mcp_servers (slug TEXT PRIMARY KEY)"))
+        if version == 3:
+            with pytest.raises(RuntimeError, match="share_config 缺失"):
+                await upgrade_mcp_share_config(manager)
+        else:
+            await upgrade_mcp_share_config(manager)
+            async with engine.connect() as conn:
+                columns = (
+                    (
+                        await conn.execute(
+                            text(
+                                "SELECT column_name FROM information_schema.columns "
+                                "WHERE table_schema=current_schema() AND table_name='mcp_servers'"
+                            )
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                assert "share_config" in columns
+    finally:
+        await _drop_isolated_schema(schema, admin, engine)
+
+
 @pytest.mark.parametrize("version", [3, 99])
 async def test_mcp_origin_skill_upgrade_adds_column_and_is_idempotent(version):
     """真实 PostgreSQL 证明 v4 升级补出来源列且可重复执行，未知版本在 DDL 前拒绝。"""

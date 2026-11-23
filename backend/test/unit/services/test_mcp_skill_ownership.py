@@ -123,7 +123,7 @@ async def test_mark_skips_builtin_connector(monkeypatch, saved):
 
 
 async def test_release_keeps_connector_referenced_by_other_skill(monkeypatch, saved):
-    """删除 Skill 后仍有别的 Skill 引用，保留启用且不改归属。"""
+    """删除 Skill 后仍有别的 Skill 引用，保留启用但解除归属。"""
     server = _server("alpha", origin_skill="travel", enabled=1)
     saved["alpha"] = server
     remaining = SimpleNamespace(id=7, slug="travel-v2")
@@ -150,7 +150,7 @@ async def test_release_keeps_connector_referenced_by_other_skill(monkeypatch, sa
         FakeSession([server]), mcp_slugs=["alpha"], skill_slug="travel", skill_id=1
     )
 
-    assert server.origin_skill == "travel"
+    assert server.origin_skill is None
     assert server.enabled == 1
 
 
