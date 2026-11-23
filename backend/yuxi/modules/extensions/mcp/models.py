@@ -47,6 +47,7 @@ class MCPServer(Base):
     enabled = Column(Integer, nullable=False, default=1, comment="是否启用：1=是，0=否")
     disabled_tools = Column(JSON, nullable=True, comment="禁用的工具名称列表")
     share_config = Column(JSON, nullable=True, comment="共享范围（v2）；空按全平台可见处理")
+    origin_skill = Column(String(100), nullable=True, index=True, comment="由该 Skill 安装时引入；空为人工或公有")
 
     # 用户追踪
     created_by = Column(String(100), nullable=False, comment="创建人用户名")
@@ -74,6 +75,7 @@ class MCPServer(Base):
             "enabled": bool(self.enabled),
             "disabled_tools": self.disabled_tools or [],
             "share_config": self.share_config,
+            "origin_skill": self.origin_skill,
             "created_by": self.created_by,
             "updated_by": self.updated_by,
             "created_at": format_utc_datetime(self.created_at),

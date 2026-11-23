@@ -70,6 +70,24 @@
         <McpFormModal v-model:open="isEditing" :edit-mode="true" :edit-data="server" @submitted="fetchServer" />
         <McpConnectionControls :server="server" @changed="fetchServer" />
 
+        <section v-if="server.origin_skill || dependentCount" class="mcp-info-section" aria-label="依赖关系">
+          <h2>依赖关系</h2>
+          <a-alert
+            v-if="server.origin_skill"
+            type="info"
+            show-icon
+            :message="`由 Skill「${server.origin_skill}」引入`"
+            description="该连接器随 Skill 生命周期管理：删除 Skill 后没有其它引用时会自动停用。"
+          />
+          <a-alert
+            v-if="dependentCount"
+            type="warning"
+            show-icon
+            :message="`被 ${dependents.skills.length} 个 Skill、${dependents.agents.length} 个智能体引用`"
+            :description="dependentNames"
+          />
+        </section>
+
         <section class="mcp-info-section" aria-label="连接信息">
           <h2>连接信息</h2>
           <dl class="mcp-info-list">
@@ -282,6 +300,13 @@ const detailTab = ref('general')
 const testLoading = ref(null)
 
 const tools = ref([])
+const dependents = ref({ skills: [], agents: [] })
+const dependentCount = computed(() => dependents.value.skills.length + dependents.value.agents.length)
+const dependentNames = computed(() =>
+  [...dependents.value.skills.map((item) => `Skill「${item.name}」`), ...dependents.value.agents.map((item) => `智能体「${item.name}」`)].join(
+    '、'
+  )
+)
 const toolsLoading = ref(false)
 const toolsError = ref(null)
 const toolSearchText = ref('')
@@ -344,6 +369,15 @@ const saveShareConfig = async () => {
     message.error(err.message || '更新共享范围失败')
   } finally {
     shareSaving.value = false
+  }
+}
+
+const fetchDependents = async () => {
+  try {
+    const result = await mcpApi.getMcpDependents(slug.value)
+    if (result.success) dependents.value = result.data || { skills: [], agents: [] }
+  } catch {
+    dependents.value = { skills: [], agents: [] }
   }
 }
 
@@ -448,9 +482,10 @@ const handleSetServerEnabled = async (srv, enabled) => {
 }
 
 const confirmDeleteServer = (srv) => {
+  const impact = dependentNames.value ? `\n\n删除后会影响：${dependentNames.value}` : ''
   Modal.confirm({
     title: '确认删除连接器',
-    content: `确定要删除连接器 "${srv.name}" 吗？此操作不可撤销。`,
+    content: `确定要删除连接器 "${srv.name}" 吗？此操作不可撤销。${impact}`,
     okText: '删除',
     okType: 'danger',
     cancelText: '取消',
@@ -478,6 +513,7 @@ watch(detailTab, (tab) => {
 
 onMounted(() => {
   fetchServer()
+  fetchDependents()
 })
 </script>
 

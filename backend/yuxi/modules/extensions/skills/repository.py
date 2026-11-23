@@ -220,3 +220,10 @@ class SkillRepository:
     async def delete(self, item: Skill) -> None:
         await self.db.delete(item)
         await self.db.flush()
+
+    async def list_referencing_mcp(self, slug: str, *, exclude_id: int | None = None) -> list[Skill]:
+        """返回声明了该 MCP 依赖的其它 Skill。"""
+        result = await self.db.execute(select(Skill))
+        return [
+            item for item in result.scalars().all() if item.id != exclude_id and slug in (item.mcp_dependencies or [])
+        ]

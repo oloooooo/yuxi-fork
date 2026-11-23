@@ -32,10 +32,11 @@ export const searchRemoteSkills = async (query) => {
   return apiPost(`${USER_BASE_URL}/remote/search`, { query })
 }
 
-export const confirmSkillInstallDraft = async (draftId, shareConfig, slugs) => {
+export const confirmSkillInstallDraft = async (draftId, shareConfig, slugs, createdMcpSlugs = []) => {
   return apiPost(`${USER_BASE_URL}/install-drafts/${encodeURIComponent(draftId)}/confirm`, {
     share_config: shareConfig,
-    slugs
+    slugs,
+    created_mcp_slugs: createdMcpSlugs
   })
 }
 

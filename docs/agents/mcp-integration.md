@@ -188,7 +188,7 @@ docker compose --env-file .env.prod -f docker-compose.prod.yml --profile contain
 
 每条命令成功后再执行下一条。开发环境可将上述命令的 `docker compose --env-file .env.prod -f docker-compose.prod.yml --profile container` 替换为 `docker compose`。升级后按[部署验证](../advanced/deployment.md#_4-验证部署)检查就绪状态，并确认已有 MCP 连接和个人凭证可用。
 
-升级只增加可空字段并登记业务 Schema 版本，保留已有服务、共享请求头和个人 OAuth 凭证。MCP 共享范围字段让业务 Schema 升到 v3：先在旧版本按上一节的个人凭证迁移升到 v2，再执行 `python -m yuxi.migrations.mcp_share_config` 升到 v3，存量连接器按全平台可见回填，页面与运行时再按新范围生效。空的新字段不改变旧 OAuth 配置修订。新库由 app-init 直接建立最新版本；运行进程只检查版本，不自动修改结构。回退旧进程版本需显式处理 Schema 版本兼容。
+升级只增加可空字段并登记业务 Schema 版本，保留已有服务、共享请求头和个人 OAuth 凭证。MCP 共享范围字段让业务 Schema 升到 v3：先在旧版本按上一节的个人凭证迁移升到 v2，再执行 `python -m yuxi.migrations.mcp_share_config` 升到 v3，存量连接器按全平台可见回填，页面与运行时再按新范围生效。连接器来源字段再升到 v4：继续执行 `python -m yuxi.migrations.mcp_origin_skill`，存量连接器保持“人工/公有”（来源为空）。空的新字段不改变旧 OAuth 配置修订。新库由 app-init 直接建立最新版本；运行进程只检查版本，不自动修改结构。回退旧进程版本需显式处理 Schema 版本兼容。
 
 ## 内置远程 MCP
 

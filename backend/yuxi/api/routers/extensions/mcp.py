@@ -18,6 +18,7 @@ from yuxi.modules.extensions.mcp.service import (
     get_all_mcp_tools,
     inspect_mcp_server_tools,
     is_builtin_mcp_server,
+    list_mcp_dependents,
     personal_connection_states,
     runtime_mcp_failure,
     set_server_enabled,
@@ -188,6 +189,19 @@ async def get_mcp_server_route(
     except Exception as e:
         logger.error(f"Failed to get MCP server: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@mcp.get("/{slug}/dependents")
+async def get_mcp_server_dependents_route(
+    slug: str,
+    current_user: User = Depends(get_required_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """列出依赖该连接器的 Skill 与智能体（只读提示）。"""
+    server = await get_server_or_404(db, slug)
+    if resolve_mcp_permission(current_user, server) == ResourcePermission.NONE:
+        raise HTTPException(status_code=403, detail="无权查看该连接器")
+    return {"success": True, "data": await list_mcp_dependents(db, slug)}
 
 
 @mcp.put("/{slug}")

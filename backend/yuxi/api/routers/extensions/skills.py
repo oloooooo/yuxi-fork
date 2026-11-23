@@ -141,6 +141,7 @@ class _DraftConfirmRequestBase(BaseModel):
 
 class SkillDraftConfirmRequest(_DraftConfirmRequestBase):
     share_config: dict | None = Field(None, description="共享权限配置")
+    created_mcp_slugs: list[str] = Field(default_factory=list, description="本次安装中新建的连接器")
 
 
 class PersonalSkillDraftConfirmRequest(_DraftConfirmRequestBase):
@@ -271,6 +272,7 @@ async def confirm_skill_install_draft_route(
             draft_id=draft_id,
             share_config=payload.share_config,
             slugs=payload.slugs,
+            created_mcp_slugs=payload.created_mcp_slugs,
             operator=current_user,
         )
         return {"success": True, "data": results, "summary": _summarize_results(results)}

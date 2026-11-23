@@ -295,6 +295,15 @@ class AgentRepository:
         await self.db.flush()
         return agent
 
+    async def list_referencing_mcp(self, slug: str) -> list[Agent]:
+        """返回显式选择了该连接器的智能体。"""
+        result = await self.db.execute(select(Agent))
+        return [
+            item
+            for item in result.scalars().all()
+            if slug in (((item.config_json or {}).get("context") or {}).get("mcps") or [])
+        ]
+
     async def delete(self, *, agent: Agent, user: User) -> None:
         """锁定 Agent 与已有 Thread，拒绝仍由该 Agent 拥有的工作。"""
         current = await self.db.scalar(

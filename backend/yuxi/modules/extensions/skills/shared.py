@@ -101,6 +101,7 @@ async def confirm_skill_install_draft(
     draft_id: str,
     share_config: dict | None,
     slugs: list[str] | None = None,
+    created_mcp_slugs: list[str] | None = None,
     operator: User,
 ) -> list[dict[str, Any]]:
     """按共享授权确认并发布 Skill 草稿。"""
@@ -119,6 +120,7 @@ async def confirm_skill_install_draft(
     repo = SkillRepository(db)
 
     results: list[dict[str, Any]] = []
+    installed: list[Skill] = []
     for draft_item in draft_items:
         slug = draft_item.slug
         final_slug = await _generate_available_slug(repo, slug)
@@ -140,12 +142,27 @@ async def confirm_skill_install_draft(
                 source_slug=slug,
             )
             results.append({"slug": item.slug, "requested_slug": slug, "success": True, "skill": item.to_dict()})
+            installed.append(item)
         except Exception as exc:
             await db.rollback()
             result = {"slug": slug, "success": False, "error": str(exc)}
             if isinstance(exc, MissingMcpDependencies):
                 result["missing_mcps"] = exc.slugs
             results.append(result)
+
+    if installed:
+        from yuxi.modules.extensions.mcp.service import mark_skill_owned_mcp_servers
+
+        created = set(created_mcp_slugs or [])
+        for item in installed:
+            await mark_skill_owned_mcp_servers(
+                db,
+                slugs=list(item.mcp_dependencies or []),
+                claimed_slugs=created,
+                skill_slug=item.slug,
+                operator=operator,
+            )
+        await db.commit()
 
     consume_installed_draft_items(draft_dir, data, {item["requested_slug"] for item in results if item["success"]})
     return results
@@ -168,6 +185,9 @@ async def delete_skill(db: AsyncSession, *, slug: str, operator: User) -> None:
     if old_shared.exists():
         owned.append(old_shared)
     await invalidate_skill_projections(db, slug)
+    from yuxi.modules.extensions.mcp.service import release_skill_owned_mcp_servers
+
+    await release_skill_owned_mcp_servers(db, mcp_slugs=list(item.mcp_dependencies or []), skill_id=item.id)
     await repo.delete(item)
     await db.commit()
     # 只删除提交前已定位的内容目录，后续同 slug 安装的新目录不属于本次删除。
@@ -214,6 +234,14 @@ async def update_skill_share_config(
     repo = SkillRepository(db)
     normalized = await validate_shared_grants(db, normalized)
     updated = await repo.update_share_config(item, share_config=normalized, updated_by=operator.uid)
+    from yuxi.modules.extensions.mcp.service import sync_mcp_share_config_for_skill
+
+    await sync_mcp_share_config_for_skill(
+        db,
+        slugs=list(item.mcp_dependencies or []),
+        share_config=normalized,
+        operator=operator,
+    )
     await commit_skill_policy_and_refresh_projections(db, slug)
     return updated
 

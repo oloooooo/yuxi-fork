@@ -188,7 +188,7 @@
           <StatusItemList :items="installItems" />
           <div v-if="missingMcpSlugs.length" class="flow-alert" role="alert">
             <span>缺少连接器：{{ missingMcpSlugs.join('、') }}</span>
-            <a-button size="small" type="primary" @click="openMcpForm">创建连接器</a-button>
+            <a-button size="small" type="primary" @click="openWizard">补齐连接器</a-button>
           </div>
           <div v-if="flowError" class="flow-alert" role="alert">{{ flowError }}</div>
         </section>
@@ -228,14 +228,12 @@
         </template>
       </footer>
     </div>
-    <McpFormModal
-      v-model:open="mcpFormVisible"
-      guided
-      :guided-hint="mcpGuidedHint"
-      :initial-data="mcpDraft"
+    <McpDependencyWizard
+      v-model:open="mcpWizardVisible"
+      :items="mcpWizardItems"
+      :allowed-access-levels="allowedAccessLevels"
       :initial-share-config="mcpInitialShareConfig"
-      :submit-text="mcpSubmitText"
-      @submitted="handleMcpCreated"
+      @finished="handleWizardFinished"
     />
   </a-modal>
 </template>
@@ -245,7 +243,7 @@ import { computed, defineComponent, h, nextTick, ref, watch } from 'vue'
 import { message } from 'ant-design-vue'
 import { CheckCircle2, Circle, LoaderCircle, PackageOpen, X as XIcon, XCircle } from '@lucide/vue'
 import ShareConfigForm from '@/modules/agents/ui/ShareConfigForm.vue'
-import McpFormModal from './McpFormModal.vue'
+import McpDependencyWizard from './McpDependencyWizard.vue'
 import { resolveApiErrorMessage } from '@/apis/base'
 import { mcpApi } from '@/apis/mcp_api'
 import { skillApi } from '@/apis/skill_api'
@@ -276,19 +274,10 @@ const installTarget = ref('personal')
 const allowedAccessLevels = ref(['user'])
 const flowError = ref('')
 const shareConfigFormRef = ref(null)
-const mcpFormVisible = ref(false)
-const pendingMcpSlugs = ref([])
-const mcpDraft = ref(null)
-const mcpTotal = ref(0)
-const mcpGuidedHint = computed(() => {
-  const slug = mcpDraft.value?.slug || ''
-  const owner = mcpDraft.value?.skillName
-  const step = mcpTotal.value > 1 ? `（第 ${mcpTotal.value - pendingMcpSlugs.value.length + 1}/${mcpTotal.value} 个）` : ''
-  return owner ? `Skill「${owner}」依赖连接器 ${slug}${step}` : `依赖连接器 ${slug}${step}`
-})
-const mcpSubmitText = computed(() =>
-  pendingMcpSlugs.value.length > 1 ? '保存并看下一个' : '保存并继续安装'
-)
+const mcpWizardVisible = ref(false)
+const wizardAutoShown = ref(false)
+const createdMcpSlugs = ref([])
+const mcpWizardItems = ref([])
 const mcpInitialShareConfig = computed(() => {
   const scope = shareConfig.value?.read_scope
   if (!scope?.access_level) return null
@@ -367,6 +356,14 @@ const failedInstallItems = computed(() =>
 const missingMcpSlugs = computed(() => [
   ...new Set(failedInstallItems.value.flatMap((item) => item.missing_mcps || []))
 ])
+const missingMcpItems = computed(() =>
+  missingMcpSlugs.value.map((slug) => ({
+    slug,
+    name: slug,
+    skillName:
+      failedInstallItems.value.find((item) => (item.missing_mcps || []).includes(slug))?.name || ''
+  }))
+)
 const successfulInstallCount = computed(
   () => installItems.value.filter((item) => item.status === 'success').length
 )
@@ -550,7 +547,12 @@ const installDrafts = async () => {
       const result =
         installTarget.value === 'personal'
           ? await skillApi.confirmPersonalSkillInstallDraft(draft.draft_id, slugs)
-          : await skillApi.confirmSkillInstallDraft(draft.draft_id, shareConfig.value, slugs)
+          : await skillApi.confirmSkillInstallDraft(
+              draft.draft_id,
+              shareConfig.value,
+              slugs,
+              createdMcpSlugs.value
+            )
       const results = result?.data || []
       applyInstallResults(results, draft.draft_id)
       const installed = new Set(
@@ -567,6 +569,10 @@ const installDrafts = async () => {
       .forEach((item) => Object.assign(item, { status: 'failed', error: flowError.value }))
   } finally {
     phase.value = 'result'
+    if (missingMcpSlugs.value.length && !wizardAutoShown.value) {
+      wizardAutoShown.value = true
+      nextTick(openWizard)
+    }
   }
 }
 
@@ -606,43 +612,33 @@ const handleClose = async () => {
   emit('close')
 }
 
-const openMcpForm = async () => {
-  pendingMcpSlugs.value = [...missingMcpSlugs.value]
-  mcpTotal.value = pendingMcpSlugs.value.length
-  if (!pendingMcpSlugs.value.length) return
+const openWizard = async () => {
+  let items = missingMcpItems.value
   try {
     const result = await mcpApi.getMcpServers()
     const existing = new Set((result.data || []).map((server) => server.slug))
-    const created = pendingMcpSlugs.value.filter((slug) => existing.has(slug))
-    if (created.length) {
-      message.info(`连接器已存在：${created.join('、')}，直接重新安装`)
-      pendingMcpSlugs.value = pendingMcpSlugs.value.filter((slug) => !existing.has(slug))
+    const found = items.filter((item) => existing.has(item.slug)).map((item) => item.slug)
+    if (found.length) {
+      message.info(`连接器已存在：${found.join('、')}，直接重新安装`)
+      items = items.filter((item) => !existing.has(item.slug))
     }
   } catch (err) {
     flowError.value = resolveApiErrorMessage(err, '读取连接器列表失败')
   }
-  if (!pendingMcpSlugs.value.length) {
+  if (!items.length) {
     retryFailedItems()
     return
   }
-  showNextMcpForm()
+  mcpWizardItems.value = items
+  mcpWizardVisible.value = true
 }
 
-const showNextMcpForm = () => {
-  const [slug] = pendingMcpSlugs.value
-  const owner = failedInstallItems.value.find((item) => (item.missing_mcps || []).includes(slug))
-  mcpDraft.value = slug ? { slug, name: slug, skillName: owner?.name || '' } : null
-  mcpFormVisible.value = Boolean(slug)
-}
-
-const handleMcpCreated = () => {
-  pendingMcpSlugs.value = pendingMcpSlugs.value.slice(1)
-  if (pendingMcpSlugs.value.length) {
-    showNextMcpForm()
-    return
+const handleWizardFinished = ({ created = [] }) => {
+  wizardAutoShown.value = false
+  if (created.length) {
+    createdMcpSlugs.value = [...new Set([...createdMcpSlugs.value, ...created])]
+    retryFailedItems()
   }
-  mcpFormVisible.value = false
-  retryFailedItems()
 }
 
 const retryFailedItems = async () => {
@@ -662,7 +658,7 @@ const retryFailedItems = async () => {
       ...retryableItems.map((item) => ({ ...item, success: true }))
     ]
     flowError.value = ''
-    phase.value = 'reviewing'
+    await installDrafts()
     return
   }
   const requestsBySource = new Map()

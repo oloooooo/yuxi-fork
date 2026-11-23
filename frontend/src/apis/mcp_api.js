@@ -28,6 +28,10 @@ export const getMcpServer = async (name) => {
   return apiAdminGet(`${BASE_URL}/${encodeURIComponent(name)}`)
 }
 
+export const getMcpDependents = async (name) => {
+  return apiAdminGet(`${BASE_URL}/${encodeURIComponent(name)}/dependents`)
+}
+
 /**
  * 创建新的 MCP 服务器
  * @param {Object} data - 服务器配置数据
@@ -125,6 +129,7 @@ export const mcpApi = {
   complete: (result) => apiPost(`${BASE_URL}/oauth/complete`, { result }),
   getMcpServers,
   getMcpServer,
+  getMcpDependents,
   createMcpServer,
   updateMcpServer,
   deleteMcpServer,

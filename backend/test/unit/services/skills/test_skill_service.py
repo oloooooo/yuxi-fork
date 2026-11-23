@@ -139,6 +139,19 @@ def _fake_skill_repository(monkeypatch, target=svc, *, existing_slugs=(), method
 
 
 class _UnitOfWork:
+    async def execute(self, *_args, **_kwargs):
+        class _Result:
+            def scalars(self):
+                return self
+
+            def all(self):
+                return []
+
+            def scalar_one_or_none(self):
+                return None
+
+        return _Result()
+
     def add(self, item):
         repo_type = svc.SkillRepository
         if hasattr(repo_type, "created_item"):
@@ -179,6 +192,11 @@ def _isolated_skill_storage(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     monkeypatch.setattr(content_service, "prune_skill_content", no_prune)
     monkeypatch.setattr(svc, "get_enabled_mcp_server_slugs", no_mcps)
     monkeypatch.setattr("yuxi.modules.extensions.mcp.service.get_enabled_mcp_server_slugs", no_mcps)
+
+    async def no_owned_mcps(*, db, skill_slug):
+        return []
+
+    monkeypatch.setattr("yuxi.modules.extensions.mcp.service.get_skill_owned_mcp_server_slugs", no_owned_mcps)
 
 
 def test_allowed_skill_access_levels_by_role():
@@ -2067,6 +2085,18 @@ def test_builtin_hash_uses_canonical_tree_and_executable_mode(tmp_path, monkeypa
     assert second != first
 
 
+class _EmptyDB:
+    async def execute(self, *_args, **_kwargs):
+        class _Result:
+            def scalars(self):
+                return self
+
+            def all(self):
+                return []
+
+        return _Result()
+
+
 @pytest.mark.parametrize("bound_agent_id", [None, 42])
 @pytest.mark.parametrize("tool_name", ["list_kbs", "query_kb", "search_file", "open_kb_document", "find_kb_document"])
 @pytest.mark.asyncio
@@ -2076,7 +2106,7 @@ async def test_shared_and_bound_skills_reject_removed_local_knowledge_dependenci
 
     with pytest.raises(ValueError, match=f"存在无效工具依赖: {tool_name}"):
         await validate_skill_dependencies(
-            db=object(),
+            db=_EmptyDB(),
             parent=SimpleNamespace(slug="consumer", bound_agent_id=bound_agent_id),
             tool_dependencies=[tool_name],
             mcp_dependencies=[],
@@ -2098,7 +2128,7 @@ async def test_shared_and_bound_skills_accept_knowledge_mcp_dependency(monkeypat
 
     monkeypatch.setattr(mcp_service, "get_enabled_mcp_server_slugs", enabled_slugs)
     assert await validate_skill_dependencies(
-        db=object(),
+        db=_EmptyDB(),
         parent=SimpleNamespace(slug="consumer", bound_agent_id=bound_agent_id),
         tool_dependencies=[],
         mcp_dependencies=["knowledge"],

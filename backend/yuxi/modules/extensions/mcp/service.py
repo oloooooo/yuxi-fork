@@ -164,6 +164,12 @@ async def get_enabled_mcp_server_slugs(*, db: AsyncSession | None = None) -> lis
     return [server.slug for server in await get_enabled_mcp_servers(db=db)]
 
 
+async def get_skill_owned_mcp_server_slugs(*, db: AsyncSession, skill_slug: str) -> list[str]:
+    """读取某个 Skill 专有但可能已停用的连接器，允许重装时恢复。"""
+    result = await db.execute(select(MCPServer.slug).where(MCPServer.origin_skill == skill_slug))
+    return list(result.scalars().all())
+
+
 async def get_enabled_mcp_servers(
     *, names: list[str] | None = None, db: AsyncSession | None = None, user=None
 ) -> list[MCPServer]:
@@ -277,6 +283,78 @@ async def update_mcp_share_config(db: AsyncSession, slug: str, share_config: dic
     await db.refresh(server)
     logger.info(f"Updated MCP share config '{slug}'")
     return server
+
+
+async def sync_mcp_share_config_for_skill(
+    db: AsyncSession, *, slugs: list[str], share_config: dict | None, operator
+) -> None:
+    """让 Skill 依赖的连接器共享范围跟随 Skill 授权。"""
+    if not slugs:
+        return
+    normalized = normalize_mcp_share_config(share_config, operator=operator)
+    for slug in dict.fromkeys(slugs):
+        server = await get_mcp_server(db, slug, lock=True)
+        if not server or is_builtin_mcp_server(server):
+            continue
+        server.share_config = normalized
+        server.updated_by = operator.username
+        await save_mcp_server(db, server)
+
+
+async def list_mcp_dependents(db: AsyncSession, slug: str) -> dict[str, list[dict[str, str]]]:
+    """列出依赖该连接器的 Skill 与智能体，供停用/删除前提示。"""
+    from yuxi.modules.agents.repositories.definitions import AgentRepository
+    from yuxi.modules.extensions.skills.repository import SkillRepository
+
+    skills = await SkillRepository(db).list_referencing_mcp(slug)
+    agents = await AgentRepository(db).list_referencing_mcp(slug)
+    return {
+        "skills": [{"slug": item.slug, "name": item.name} for item in skills],
+        "agents": [{"slug": item.slug, "name": item.name} for item in agents],
+    }
+
+
+async def mark_skill_owned_mcp_servers(
+    db: AsyncSession, *, slugs: list[str], claimed_slugs: set[str], skill_slug: str, operator
+) -> None:
+    """标记本次新建的连接器；已属于该 Skill 的依赖重装时恢复启用。"""
+    for slug in sorted(dict.fromkeys(slugs)):
+        server = await get_mcp_server(db, slug, lock=True)
+        if not server or is_builtin_mcp_server(server):
+            continue
+        if server.origin_skill == skill_slug:
+            server.enabled = 1
+            await save_mcp_server(db, server)
+            continue
+        if slug not in claimed_slugs or server.origin_skill is not None:
+            continue
+        if server.created_by != operator.username:
+            continue
+        server.origin_skill = skill_slug
+        server.enabled = 1
+        server.updated_by = operator.username
+        await save_mcp_server(db, server)
+
+
+async def release_skill_owned_mcp_servers(
+    db: AsyncSession, *, mcp_slugs: list[str], skill_id: int
+) -> None:
+    """删除 Skill 后停用已无引用的专有连接器，事务由调用方提交。"""
+    from yuxi.modules.agents.repositories.definitions import AgentRepository
+    from yuxi.modules.extensions.skills.repository import SkillRepository
+
+    skill_repo = SkillRepository(db)
+    agent_repo = AgentRepository(db)
+    for slug in sorted(dict.fromkeys(mcp_slugs)):
+        server = await get_mcp_server(db, slug, lock=True)
+        if not server or is_builtin_mcp_server(server) or not server.origin_skill:
+            continue
+        if await skill_repo.list_referencing_mcp(slug, exclude_id=skill_id):
+            continue
+        if await agent_repo.list_referencing_mcp(slug):
+            continue
+        server.enabled = 0
+        await save_mcp_server(db, server)
 
 
 async def update_mcp_server(

@@ -20,12 +20,26 @@ from yuxi.modules.workspace.paths import user_workspace_dir
 from yuxi.modules.workspace.runtime_files import RuntimeFiles
 
 
+class _EmptyResult:
+    def scalars(self):
+        return self
+
+    def all(self):
+        return []
+
+    def scalar_one_or_none(self):
+        return None
+
+
 class _Session:
     def __init__(self, *, fail_commit: bool = False):
         self.fail_commit = fail_commit
 
     def add(self, item):
         pass
+
+    async def execute(self, *_args, **_kwargs):
+        return _EmptyResult()
 
     async def flush(self):
         pass

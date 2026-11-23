@@ -176,7 +176,7 @@ async def test_fresh_business_schema_contains_input_lifecycle_without_request_ta
             "thread_id",
         } <= input_columns
         assert "conversation_thread_id" not in input_columns
-        assert BUSINESS_SCHEMA_VERSION == 3
+        assert BUSINESS_SCHEMA_VERSION == 4
         assert KNOWLEDGE_SCHEMA_VERSION == 2
     finally:
         await _drop_isolated_schema(schema, admin_engine, scoped_engine)
@@ -606,5 +606,42 @@ async def test_mcp_share_config_upgrade_backfills_global_and_is_idempotent(versi
                     "X-API-Key": "fixture-shared"
                 }
         assert (await get_schema_versions(manager))["business"] == (3 if version == 2 else 99)
+    finally:
+        await _drop_isolated_schema(schema, admin, engine)
+
+
+@pytest.mark.parametrize("version", [3, 99])
+async def test_mcp_origin_skill_upgrade_adds_column_and_is_idempotent(version):
+    """真实 PostgreSQL 证明 v4 升级补出来源列且可重复执行，未知版本在 DDL 前拒绝。"""
+    from yuxi.migrations.mcp_origin_skill import upgrade_mcp_origin_skill
+
+    schema, admin, engine, manager = await _create_isolated_manager("pytest_mcp_origin_upgrade")
+    try:
+        await create_schema_version_table(manager)
+        await record_schema_version(manager, "business", version)
+        async with engine.begin() as conn:
+            await conn.execute(text("CREATE TABLE mcp_servers (slug TEXT PRIMARY KEY)"))
+            await conn.execute(text("INSERT INTO mcp_servers VALUES ('existing')"))
+        if version == 99:
+            with pytest.raises(RuntimeError, match="business v3"):
+                await upgrade_mcp_origin_skill(manager)
+        else:
+            await upgrade_mcp_origin_skill(manager)
+            await upgrade_mcp_origin_skill(manager)
+            async with engine.connect() as conn:
+                columns = (
+                    (
+                        await conn.execute(
+                            text(
+                                "SELECT column_name FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='mcp_servers'"
+                            )
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                assert "origin_skill" in columns
+                assert await conn.scalar(text("SELECT origin_skill FROM mcp_servers WHERE slug='existing'")) is None
+        assert (await get_schema_versions(manager))["business"] == (4 if version == 3 else 99)
     finally:
         await _drop_isolated_schema(schema, admin, engine)
