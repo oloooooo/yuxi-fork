@@ -2081,6 +2081,33 @@ def test_builtin_hash_uses_canonical_tree_and_executable_mode(tmp_path, monkeypa
     assert second != first
 
 
+@pytest.mark.asyncio
+async def test_disabled_mcp_dependency_reports_enable_hint(monkeypatch):
+    """依赖已存在但被停用时给出启用提示，而不是笼统报无效依赖。"""
+    from yuxi.modules.extensions.mcp import repository as mcp_repository
+    from yuxi.modules.extensions.mcp import service as mcp_service
+    from yuxi.modules.extensions.skills.access import validate_skill_dependencies
+
+    async def no_enabled(*, db):
+        return []
+
+    async def all_servers(db):
+        return [SimpleNamespace(slug="paused-mcp")]
+
+    monkeypatch.setattr(mcp_service, "get_enabled_mcp_server_slugs", no_enabled)
+    monkeypatch.setattr(mcp_repository, "get_all_mcp_servers", all_servers)
+
+    with pytest.raises(ValueError, match="MCP 依赖被停用了"):
+        await validate_skill_dependencies(
+            db=_EmptyDB(),
+            parent=SimpleNamespace(slug="consumer", bound_agent_id=None),
+            tool_dependencies=[],
+            mcp_dependencies=["paused-mcp"],
+            skill_dependencies=[],
+            available_skills={},
+        )
+
+
 class _EmptyDB:
     async def execute(self, *_args, **_kwargs):
         class _Result:

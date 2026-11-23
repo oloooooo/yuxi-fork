@@ -77,6 +77,7 @@ async def validate_skill_dependencies(
     skills = normalize_string_list(skill_dependencies)
 
     # 验证所有工具（不仅仅是 builtin）
+    from yuxi.modules.extensions.mcp.repository import get_all_mcp_servers
     from yuxi.modules.extensions.mcp.service import get_enabled_mcp_server_slugs
     from yuxi.modules.extensions.tools.catalog import get_tool_metadata
 
@@ -88,6 +89,10 @@ async def validate_skill_dependencies(
     available_mcps = set(await get_enabled_mcp_server_slugs(db=db))
     invalid_mcps = [name for name in mcps if name not in available_mcps]
     if invalid_mcps:
+        known_mcps = {server.slug for server in await get_all_mcp_servers(db)}
+        disabled_mcps = [name for name in invalid_mcps if name in known_mcps]
+        if disabled_mcps:
+            raise ValueError(f"MCP 依赖被停用了，请启用或删除后重新导入 Skill: {', '.join(disabled_mcps)}")
         raise MissingMcpDependencies(invalid_mcps)
 
     invalid_skills = [name for name in skills if name not in available_skills]

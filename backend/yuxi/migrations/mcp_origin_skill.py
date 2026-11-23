@@ -14,6 +14,15 @@ async def upgrade_mcp_origin_skill(manager: PostgresManager) -> None:
     async with schema_migration_lock(manager):
         versions = await get_schema_versions(manager)
         if versions.get("business") == 4 and "initializing" not in versions:
+            async with manager.async_engine.connect() as conn:
+                column = await conn.execute(
+                    text(
+                        "SELECT 1 FROM information_schema.columns "
+                        "WHERE table_name = 'mcp_servers' AND column_name = 'origin_skill'"
+                    )
+                )
+                if column.first() is None:
+                    raise RuntimeError("business 版本为 4 但 mcp_servers.origin_skill 缺失，请检查迁移日志")
             return
         if versions.get("business") != 3 or "initializing" in versions:
             raise RuntimeError("连接器来源升级需要已完成初始化的 business v3")

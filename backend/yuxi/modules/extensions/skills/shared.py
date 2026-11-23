@@ -160,6 +160,8 @@ async def confirm_skill_install_draft(
         )
 
         created = set(created_mcp_slugs or [])
+        # 只取依赖与回传的交集，避免客户端携带无关标识放大锁定顺序。
+        created &= {slug for item in installed for slug in (item.mcp_dependencies or [])}
         try:
             for item in installed:
                 await mark_skill_owned_mcp_servers(

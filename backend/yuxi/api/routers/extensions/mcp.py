@@ -10,6 +10,7 @@ from yuxi.infrastructure.observability.logging import logger
 from yuxi.modules.extensions.mcp.oauth_config import PERSONAL_AUTH_MODES, STATIC_AUTH_MODES, config_revision
 from yuxi.modules.extensions.mcp.repository import get_all_mcp_servers, get_mcp_server
 from yuxi.modules.extensions.mcp.service import (
+    MCPServerInUseError,
     MCPServerNotFoundError,
     allowed_mcp_access_levels,
     available_mcp_servers,
@@ -152,7 +153,7 @@ async def create_mcp_server_route(
             timeout=request.timeout,
             sse_read_timeout=request.sse_read_timeout,
             share_config=request.share_config,
-            created_by=current_user.username,
+            created_by=current_user.uid,
             auth_mode=request.auth_mode,
             oauth_config=request.oauth_config,
             api_key_header=request.api_key_header,
@@ -264,6 +265,11 @@ async def delete_mcp_server_route(
         if not deleted:
             raise HTTPException(status_code=404, detail=f"服务器 '{slug}' 不存在")
         return {"success": True, "message": f"服务器 '{slug}' 已删除"}
+    except MCPServerInUseError as e:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "mcp_server_in_use", "message": str(e), "dependents": e.dependents},
+        )
     except HTTPException:
         raise
     except Exception as e:

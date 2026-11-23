@@ -51,6 +51,14 @@ class MCPServerNotFoundError(ValueError):
     """表示指定的 MCP 服务器不存在。"""
 
 
+class MCPServerInUseError(ValueError):
+    """表示连接器仍被 Skill 或智能体引用，不能删除。"""
+
+    def __init__(self, message: str, dependents: dict[str, list[dict[str, str]]]):
+        super().__init__(message)
+        self.dependents = dependents
+
+
 def allowed_mcp_access_levels(user) -> list[str]:
     """返回操作人可设定的连接器共享范围。"""
     if user.role == "superadmin":
@@ -316,7 +324,11 @@ async def list_mcp_dependents(db: AsyncSession, slug: str) -> dict[str, list[dic
 async def mark_skill_owned_mcp_servers(
     db: AsyncSession, *, slugs: list[str], claimed_slugs: set[str], skill_slug: str, operator
 ) -> None:
-    """认领本次新建的连接器：仅限操作人自建、尚无归属且在依赖列表内的标识。"""
+    """认领本次新建的连接器：仅限操作人自建、尚无归属且在依赖列表内的标识。
+
+    `claimed_slugs` 来自客户端回传，只作为「本次新建」的提示；实际认领仍以依赖列表和
+    `origin_skill` 为空为准，多余条目会被忽略。
+    """
     for slug in sorted(dict.fromkeys(slugs)):
         server = await get_mcp_server(db, slug, lock=True)
         if not server or is_builtin_mcp_server(server):
@@ -325,7 +337,7 @@ async def mark_skill_owned_mcp_servers(
             continue
         if slug not in claimed_slugs or server.origin_skill is not None:
             continue
-        if server.created_by != operator.username:
+        if server.created_by not in {getattr(operator, "uid", None), operator.username}:
             continue
         server.origin_skill = skill_slug
         server.updated_by = operator.username
@@ -408,12 +420,17 @@ async def update_mcp_server(
 
 
 async def delete_mcp_server(db: AsyncSession, slug: str) -> bool:
-    """删除 MCP 服务器，内置服务器由代码管理。"""
+    """删除 MCP 服务器；内置或仍被 Skill/智能体引用时拒绝。"""
     server = await get_mcp_server(db, slug)
     if not server:
         return False
     if is_builtin_mcp_server(server):
         raise PermissionError("系统内置连接器的连接配置由代码管理，无法删除")
+
+    dependents = await list_mcp_dependents(db, slug)
+    if dependents["skills"] or dependents["agents"]:
+        names = [item["name"] for item in dependents["skills"] + dependents["agents"]]
+        raise MCPServerInUseError(f"仍有引用该连接器的对象: {', '.join(names)}", dependents)
 
     await delete_mcp_server_row(db, server)
     await db.commit()
