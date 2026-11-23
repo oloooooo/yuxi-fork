@@ -664,7 +664,7 @@ const retryFailedItems = async () => {
     retrySlugs.value = new Set(retryableItems.map((item) => item.slug))
     reviewItems.value = [
       ...installItems.value.filter((item) => item.status === 'success'),
-      ...failedInstallItems.value.map((item) => ({ ...item, success: false }))
+      ...failedInstallItems.value.map((item) => ({ ...item, success: retrySlugs.value.has(item.slug) }))
     ]
     flowError.value = ''
     await installDrafts()

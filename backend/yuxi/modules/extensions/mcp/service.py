@@ -81,12 +81,15 @@ def default_mcp_share_config(user) -> dict:
 
 def normalize_mcp_share_config(share_config: dict | None, *, operator) -> dict:
     """校验并标准化连接器共享范围，越权范围显式失败。"""
-    return normalize_permission_config(
+    normalized = normalize_permission_config(
         share_config or default_mcp_share_config(operator),
         allowed_access_levels=set(allowed_mcp_access_levels(operator)),
         unauthorized_access_level_message="当前用户无权使用该连接器共享范围",
         strict=True,
     )
+    # 连接器没有「管理范围」语义，统一丢弃，避免写入永不生效的配置。
+    normalized["manage_scope"] = None
+    return normalized
 
 
 def mcp_server_visible(user, server: MCPServer) -> bool:
@@ -281,8 +284,6 @@ async def update_mcp_share_config(db: AsyncSession, slug: str, share_config: dic
     if resolve_mcp_permission(operator, server) != ResourcePermission.MANAGE:
         raise PermissionError("仅管理员可修改连接器共享范围")
     normalized = normalize_mcp_share_config(share_config, operator=operator)
-    if normalized is not None:
-        normalized["manage_scope"] = None
     server.share_config = normalized
     server.updated_by = operator.username
     await db.commit()

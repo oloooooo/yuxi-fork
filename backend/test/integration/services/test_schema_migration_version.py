@@ -644,7 +644,7 @@ async def test_mcp_share_config_upgrade_rejects_half_upgraded_schema(version):
         await _drop_isolated_schema(schema, admin, engine)
 
 
-@pytest.mark.parametrize("version", [3, 99])
+@pytest.mark.parametrize("version", [3, 4, 99])
 async def test_mcp_origin_skill_upgrade_adds_column_and_is_idempotent(version):
     """真实 PostgreSQL 证明 v4 升级补出来源列且可重复执行，未知版本在 DDL 前拒绝。"""
     from yuxi.migrations.mcp_origin_skill import upgrade_mcp_origin_skill
@@ -656,7 +656,10 @@ async def test_mcp_origin_skill_upgrade_adds_column_and_is_idempotent(version):
         async with engine.begin() as conn:
             await conn.execute(text("CREATE TABLE mcp_servers (slug TEXT PRIMARY KEY)"))
             await conn.execute(text("INSERT INTO mcp_servers VALUES ('existing')"))
-        if version == 99:
+        if version == 4:
+            with pytest.raises(RuntimeError, match="origin_skill 缺失"):
+                await upgrade_mcp_origin_skill(manager)
+        elif version == 99:
             with pytest.raises(RuntimeError, match="business v3"):
                 await upgrade_mcp_origin_skill(manager)
         else:
@@ -676,6 +679,6 @@ async def test_mcp_origin_skill_upgrade_adds_column_and_is_idempotent(version):
                 )
                 assert "origin_skill" in columns
                 assert await conn.scalar(text("SELECT origin_skill FROM mcp_servers WHERE slug='existing'")) is None
-        assert (await get_schema_versions(manager))["business"] == (4 if version == 3 else 99)
+        assert (await get_schema_versions(manager))["business"] == (4 if version in (3, 4) else 99)
     finally:
         await _drop_isolated_schema(schema, admin, engine)
