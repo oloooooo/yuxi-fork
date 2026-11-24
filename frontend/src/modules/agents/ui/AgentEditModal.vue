@@ -207,11 +207,18 @@ const getInitialShareConfig = (accessLevel = 'user') => ({
   version: 2,
   read_scope: {
     access_level: accessLevel,
-    department_ids: [],
+    department_ids: accessLevel === 'department' && userStore.departmentId ? [userStore.departmentId] : [],
     user_uids: accessLevel === 'user' && userStore.uid ? [userStore.uid] : []
   },
   manage_scope: null
 })
+
+/** 新建共享智能体的默认范围：超管全平台、部门管理员本部门、其他人指定人。 */
+const defaultShareAccessLevel = () => {
+  if (userStore.isSuperAdmin) return 'global'
+  if (userStore.isAdmin && userStore.departmentId) return 'department'
+  return 'user'
+}
 
 const normalizeShareConfigForPayload = () => {
   if (isBuiltinAgent({ agent_id: editingAgentId.value })) {
@@ -240,6 +247,7 @@ const agentScopeLocked = computed(() => {
 
 const getAgentShareAllowedLevels = () => {
   if (isEditingBuiltinAgent.value) return ['global']
+  if (userStore.isSuperAdmin) return ['global', 'department', 'user']
   if (userStore.isAdmin) return ['department', 'user']
   return ['user']
 }
@@ -266,7 +274,7 @@ const resetAgentForm = () => {
     icon: '',
     ...defaults
   })
-  agentShareConfig.value = getInitialShareConfig('global')
+  agentShareConfig.value = getInitialShareConfig(defaultShareAccessLevel())
 }
 
 const focusAgentNameInput = async () => {
