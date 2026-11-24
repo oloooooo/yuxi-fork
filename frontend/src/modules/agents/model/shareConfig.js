@@ -10,9 +10,10 @@ export function getShareConfigLabel(shareConfig, invalid = false) {
     if (scope.access_level === 'department') return `部门(${scope.department_ids?.length || 0})`
     return `用户(${scope.user_uids?.length || 0})`
   }
-  return manageScope
-    ? `读${scopeLabel(readScope)} · 管${scopeLabel(manageScope)}`
-    : `只读${scopeLabel(readScope)}`
+  if (manageScope) return `读${scopeLabel(readScope)} · 管${scopeLabel(manageScope)}`
+  // 部门范围的管理权属于该部门的管理员，这里不能标成“只读”。
+  if (readScope?.access_level === 'department') return `${scopeLabel(readScope)} · 管理员可管`
+  return `只读${scopeLabel(readScope)}`
 }
 
 /** 复制共享配置，坏配置仅在本地暂设为仅所有者，等待用户明确保存。 */

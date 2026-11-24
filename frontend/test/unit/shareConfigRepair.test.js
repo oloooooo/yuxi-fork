@@ -30,5 +30,5 @@ test('合法共享配置在 Vue 响应式表单中独立复制，保留共享标
   assert.deepEqual(copy, JSON.parse(JSON.stringify(source)))
   copy.read_scope.department_ids.push(2)
   assert.deepEqual(source.read_scope.department_ids, [1])
-  assert.equal(getShareConfigLabel(source), '只读部门(1)')
+  assert.equal(getShareConfigLabel(source), '部门(1) · 管理员可管')
 })
