@@ -17,6 +17,7 @@ MODEL_MODULES = (
     "yuxi.modules.agents.models.feedback",
     "yuxi.modules.workspace.models",
     "yuxi.modules.identity.models",
+    "yuxi.modules.identity.subscriptions.models",
     "yuxi.modules.extensions.skills.models",
     "yuxi.modules.extensions.mcp.models",
     "yuxi.modules.models.tables",

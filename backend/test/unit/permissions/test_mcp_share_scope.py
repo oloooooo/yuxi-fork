@@ -94,7 +94,7 @@ async def test_enabled_servers_filtered_by_share_scope(monkeypatch):
         return [hidden, visible, disabled]
 
     monkeypatch.setattr(mcp_service, "list_enabled_mcp_servers", fake_list)
-    servers = await mcp_service.get_enabled_mcp_servers(db=object(), user=_user())
+    servers = await mcp_service.get_enabled_mcp_servers(db=SimpleNamespace(info={}), user=_user())
     assert [server.slug for server in servers] == ["visible"]
 
 

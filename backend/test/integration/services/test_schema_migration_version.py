@@ -644,6 +644,38 @@ async def test_mcp_share_config_upgrade_rejects_half_upgraded_schema(version):
         await _drop_isolated_schema(schema, admin, engine)
 
 
+@pytest.mark.parametrize("version", [4, 99])
+async def test_resource_subscriptions_upgrade_creates_table_and_is_idempotent(version):
+    """真实 PostgreSQL 证明 v5 升级建表且可重复执行，未知版本拒绝。"""
+    from yuxi.migrations.resource_subscriptions import upgrade_resource_subscriptions
+
+    schema, admin, engine, manager = await _create_isolated_manager("pytest_resource_subscriptions")
+    try:
+        await create_schema_version_table(manager)
+        await record_schema_version(manager, "business", version)
+        async with engine.begin() as conn:
+            await conn.execute(text("CREATE TABLE users (id SERIAL PRIMARY KEY)"))
+        if version == 99:
+            with pytest.raises(RuntimeError, match="business v4"):
+                await upgrade_resource_subscriptions(manager)
+        else:
+            await upgrade_resource_subscriptions(manager)
+            await upgrade_resource_subscriptions(manager)
+            async with engine.connect() as conn:
+                assert (
+                    await conn.scalar(
+                        text(
+                            "SELECT 1 FROM information_schema.tables "
+                            "WHERE table_schema = current_schema() AND table_name = 'resource_subscriptions'"
+                        )
+                    )
+                    is not None
+                )
+        assert (await get_schema_versions(manager))["business"] == (5 if version == 4 else 99)
+    finally:
+        await _drop_isolated_schema(schema, admin, engine)
+
+
 @pytest.mark.parametrize("version", [3, 4, 99])
 async def test_mcp_origin_skill_upgrade_adds_column_and_is_idempotent(version):
     """真实 PostgreSQL 证明 v4 升级补出来源列且可重复执行，未知版本在 DDL 前拒绝。"""

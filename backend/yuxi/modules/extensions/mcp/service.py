@@ -92,9 +92,9 @@ def normalize_mcp_share_config(share_config: dict | None, *, operator) -> dict:
     return normalized
 
 
-def mcp_server_visible(user, server: MCPServer) -> bool:
-    """判断已启用的连接器是否对当前用户可读。"""
-    return bool(server.enabled) and resolve_mcp_permission(user, server) != ResourcePermission.NONE
+def mcp_server_visible(user, server: MCPServer, *, granted: bool = False) -> bool:
+    """判断已启用的连接器是否对当前用户可读；granted 表示已获批订阅。"""
+    return bool(server.enabled) and resolve_mcp_permission(user, server, granted=granted) != ResourcePermission.NONE
 
 
 def is_builtin_mcp_server(server: MCPServer) -> bool:
@@ -176,6 +176,20 @@ async def get_enabled_mcp_server_slugs(*, db: AsyncSession | None = None) -> lis
     return [server.slug for server in await get_enabled_mcp_servers(db=db)]
 
 
+async def _granted_mcp_slugs(db: AsyncSession, user) -> set[str]:
+    """读取当前用户已获批的连接器订阅，供可见性判断使用。"""
+    from yuxi.modules.identity.subscriptions.service import approved_slugs
+
+    user_id = getattr(user, "id", None)
+    if user_id is None:
+        return set()
+    cache = db.info.setdefault("approved_subscription_slugs", {})
+    key = (user_id, "mcp")
+    if key not in cache:
+        cache[key] = await approved_slugs(db, user_id=user_id, resource_type="mcp")
+    return cache[key]
+
+
 async def get_enabled_mcp_servers(
     *, names: list[str] | None = None, db: AsyncSession | None = None, user=None
 ) -> list[MCPServer]:
@@ -189,7 +203,8 @@ async def get_enabled_mcp_servers(
     servers = [server for server in await list_enabled_mcp_servers(db, names=names) if builtin_mcp_available(server.slug)]
     if user is None:
         return servers
-    return [server for server in servers if mcp_server_visible(user, server)]
+    granted = await _granted_mcp_slugs(db, user)
+    return [server for server in servers if mcp_server_visible(user, server, granted=server.slug in granted)]
 
 
 async def get_mcp_tools(
@@ -609,10 +624,11 @@ async def available_mcp_servers(db: AsyncSession, server_slugs, *, user_id: int)
         return {}
     user = await active_mcp_user(db, user_id=user_id)
     rows = await runtime_mcp_servers(db, server_slugs, user_id)
+    granted = await _granted_mcp_slugs(db, user)
     available = {
         server.slug: server
         for server, connection in rows
-        if mcp_server_visible(user, server)
+        if mcp_server_visible(user, server, granted=server.slug in granted)
         and builtin_mcp_available(server.slug)
         and connection_status(server, connection) in {"connected", "not_required"}
     }

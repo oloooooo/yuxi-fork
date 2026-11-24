@@ -185,7 +185,8 @@ async def serialize_agent_definition(
     permission = resolve_agent_permission(user, agent)
     is_builtin = is_builtin_agent(agent)
     data["can_manage"] = user_can_manage_agent(user, agent)
-    data["can_run"] = user_can_run_agent(user, agent)
+    granted = agent.visibility != "private" and agent.slug in await AgentRepository(db)._granted_slugs(user)
+    data["can_run"] = user_can_run_agent(user, agent, granted=granted)
     data["can_share"] = data["can_manage"] and not is_builtin and (agent.visibility == "shared" or user.role in ADMIN_ROLES)
     data["can_transfer"] = agent.visibility == "shared" and user.role == "superadmin" and not is_builtin
     data["effective_permission"] = permission.value

@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>资源订阅测试</title></head>
+<body>
+<div id="app" style="max-width:1100px;margin:40px auto;padding:24px"></div>
+<script type="module">
+import { createApp, h } from 'vue'
+import { createPinia } from 'pinia'
+import Antd, { ConfigProvider } from 'ant-design-vue'
+import { useThemeStore } from '../../../src/shared/model/theme.js'
+import { useUserStore } from '../../../src/modules/identity/model/user.js'
+import SubscriptionPanel from '../../../src/modules/extensions/ui/SubscriptionPanel.vue'
+import '../../../src/assets/css/main.css'
+
+const pinia = createPinia()
+const app = createApp({ render: () => h(ConfigProvider, { theme: theme.currentTheme }, { default: () => h(SubscriptionPanel) }) })
+app.use(pinia).use(Antd)
+const user = useUserStore()
+Object.assign(user, { token: 'subscription-browser-fixture', uid: 'fixture-admin', username: 'Admin', userRole: 'superadmin' })
+const theme = useThemeStore()
+theme.setTheme('light')
+window.subscriptionFixture = { user, theme }
+app.mount('#app')
+</script>
+</body>
+</html>

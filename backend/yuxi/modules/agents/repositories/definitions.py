@@ -109,8 +109,21 @@ class AgentRepository:
         self.db.add(agent)
         return agent, True
 
+    async def _granted_slugs(self, user: User) -> set[str]:
+        """已获批的智能体订阅，用于补足共享范围拒绝的只读访问。"""
+        user_id = getattr(user, "id", None)
+        if user_id is None:
+            return set()
+        cache = self.db.info.setdefault("approved_subscription_slugs", {})
+        key = (user_id, "agent")
+        if key not in cache:
+            from yuxi.modules.identity.subscriptions.repository import SubscriptionRepository
+
+            cache[key] = await SubscriptionRepository(self.db).approved_slugs(user_id=user_id, resource_type="agent")
+        return cache[key]
+
     async def list_visible(self, *, user: User) -> list[Agent]:
-        """列出当前用户可见的智能体配置。"""
+        """列出当前用户可见的智能体配置，已获批订阅的共享智能体一并返回。"""
         visibility_user = await self._visibility_user(user)
         if visibility_user is None:
             return []
@@ -119,11 +132,12 @@ class AgentRepository:
         agents = list(result.scalars().all())
         if visibility_user.role == "superadmin":
             return agents
+        granted = await self._granted_slugs(user)
         return [
             agent
             for agent in agents
             if (getattr(user, "user_kind", "human") != "end_user" or agent.visibility == "shared")
-            and user_can_access_agent(visibility_user, agent)
+            and user_can_access_agent(visibility_user, agent, granted=agent.slug in granted)
         ]
 
     async def get_by_slug(self, slug: str, *, for_key_share: bool = False) -> Agent | None:
@@ -151,9 +165,10 @@ class AgentRepository:
             return None
         if getattr(user, "user_kind", "human") == "end_user" and agent.visibility != "shared":
             return None
+        granted = agent.visibility != "private" and agent.slug in await self._granted_slugs(user)
         if for_run and agent.visibility == "private" and not user_can_run_agent(user, agent):
             return None
-        if not user_can_access_agent(visibility_user, agent):
+        if not user_can_access_agent(visibility_user, agent, granted=granted):
             return None
         return agent
 

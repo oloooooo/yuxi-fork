@@ -29,6 +29,7 @@ from yuxi.modules.extensions.mcp.service import (
 )
 from yuxi.modules.identity.models import User
 from yuxi.modules.identity.permissions import ADMIN_ROLES, ResourcePermission, resolve_mcp_permission
+from yuxi.modules.identity.subscriptions.service import approved_slugs
 from yuxi.shared.errors import DomainError
 
 mcp = APIRouter(prefix="/system/mcp-servers", tags=["mcp"])
@@ -105,9 +106,10 @@ async def get_mcp_servers(
                 ],
             }
 
+        granted = await approved_slugs(db, user_id=current_user.id, resource_type="mcp")
         data = []
         for server in servers:
-            if resolve_mcp_permission(current_user, server) == ResourcePermission.NONE:
+            if resolve_mcp_permission(current_user, server, granted=server.slug in granted) == ResourcePermission.NONE:
                 continue
             if not server.enabled and states[server.slug] not in {"connected", "reconnect_required"}:
                 continue
@@ -178,7 +180,8 @@ async def get_mcp_server_route(
     """获取单个 MCP 服务器配置（非超管脱敏）"""
     try:
         server = await get_server_or_404(db, slug)
-        if resolve_mcp_permission(current_user, server) == ResourcePermission.NONE:
+        granted = await approved_slugs(db, user_id=current_user.id, resource_type="mcp")
+        if resolve_mcp_permission(current_user, server, granted=slug in granted) == ResourcePermission.NONE:
             raise HTTPException(status_code=403, detail="无权查看该连接器")
         states = await personal_connection_states(db, [server], current_user.id)
         return {
@@ -374,7 +377,8 @@ async def get_mcp_server_tools(
     """获取 MCP 服务器的工具列表"""
     try:
         server = await get_server_or_404(db, slug)
-        if resolve_mcp_permission(current_user, server) == ResourcePermission.NONE:
+        granted = await approved_slugs(db, user_id=current_user.id, resource_type="mcp")
+        if resolve_mcp_permission(current_user, server, granted=slug in granted) == ResourcePermission.NONE:
             raise HTTPException(status_code=403, detail="无权查看该连接器")
         disabled_tools = server.disabled_tools or []
 

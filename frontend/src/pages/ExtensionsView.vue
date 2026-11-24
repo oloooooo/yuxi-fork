@@ -23,6 +23,9 @@
       <div v-if="activeTab === 'mcp'" class="tab-panel">
         <McpCardList ref="mcpRef" />
       </div>
+      <div v-if="activeTab === 'subscriptions'" class="tab-panel">
+        <SubscriptionPanel ref="subscriptionsRef" @pending-change="handlePendingChange" />
+      </div>
     </div>
 
     <router-view v-else :key="route.path" />
@@ -35,6 +38,7 @@ import { message } from 'ant-design-vue'
 import { useRoute, useRouter } from 'vue-router'
 import ToolsCardList from '@/modules/extensions/ui/ToolsCardList.vue'
 import McpCardList from '@/modules/extensions/ui/McpCardList.vue'
+import SubscriptionPanel from '@/modules/extensions/ui/SubscriptionPanel.vue'
 import SkillCardList from '@/modules/extensions/ui/SkillCardList.vue'
 import PageHeader from '@/shared/ui/PageHeader.vue'
 import KnowledgeBaseView from '@/modules/knowledge/ui/KnowledgeCatalog.vue'
@@ -48,18 +52,32 @@ const knowledgeRef = ref(null)
 const skillsRef = ref(null)
 const mcpRef = ref(null)
 const toolsRef = ref(null)
+const subscriptionsRef = ref(null)
+const pendingCount = ref(0)
 
+const subscriptionLabel = computed(() =>
+  pendingCount.value > 0 ? `订阅 · ${pendingCount.value}` : '订阅'
+)
 const adminExtensionTabs = computed(() => [
   { key: 'knowledge', label: '知识库' },
   { key: 'skills', label: '技能' },
   { key: 'tools', label: '工具' },
-  { key: 'mcp', label: '连接器' }
+  { key: 'mcp', label: '连接器' },
+  { key: 'subscriptions', label: subscriptionLabel.value }
 ])
-const userExtensionTabs = [{ key: 'skills', label: '技能' }, { key: 'mcp', label: '连接器' }]
+const userExtensionTabs = computed(() => [
+  { key: 'skills', label: '技能' },
+  { key: 'mcp', label: '连接器' },
+  { key: 'subscriptions', label: subscriptionLabel.value }
+])
 const extensionTabs = computed(() =>
-  userStore.isAdmin ? adminExtensionTabs.value : userExtensionTabs
+  userStore.isAdmin ? adminExtensionTabs.value : userExtensionTabs.value
 )
 const allowedTabKeys = computed(() => extensionTabs.value.map((tab) => tab.key))
+
+function handlePendingChange(result) {
+  pendingCount.value = result?.data?.count || 0
+}
 const defaultTabKey = computed(() => extensionTabs.value[0]?.key || 'skills')
 
 const normalizeTab = (tab) => {
@@ -90,7 +108,8 @@ const activeChildLoading = computed(() => {
     knowledge: knowledgeRef,
     tools: toolsRef,
     skills: skillsRef,
-    mcp: mcpRef
+    mcp: mcpRef,
+    subscriptions: subscriptionsRef
   }
   const child = refMap[activeTab.value]
   return child?.value?.loading || false

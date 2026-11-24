@@ -14,23 +14,43 @@ class SkillRepository:
     def __init__(self, db_session: AsyncSession):
         self.db = db_session
 
+    async def _granted_slugs(self, user: User) -> set[str]:
+        """已获批的 Skill 订阅，用于补足共享范围拒绝的只读访问。"""
+        user_id = getattr(user, "id", None)
+        if user_id is None:
+            return set()
+        cache = self.db.info.setdefault("approved_subscription_slugs", {})
+        key = (user_id, "skill")
+        if key not in cache:
+            from yuxi.modules.identity.subscriptions.repository import SubscriptionRepository
+
+            cache[key] = await SubscriptionRepository(self.db).approved_slugs(user_id=user_id, resource_type="skill")
+        return cache[key]
+
     async def list_enabled_readable(self, user: User) -> list[Skill]:
         """只返回当前用户可使用的已启用共享索引。"""
-        return [item for item in await self.list_enabled() if resolve_skill_permission(user, item) != ResourcePermission.NONE]
+        granted = await self._granted_slugs(user)
+        return [
+            item
+            for item in await self.list_enabled()
+            if resolve_skill_permission(user, item, granted=item.slug in granted) != ResourcePermission.NONE
+        ]
 
     async def list_authorized_for_projection(self, user: User) -> list[Skill]:
         """为投影锁定阶段包含当前用户可读的停用项。"""
+        granted = await self._granted_slugs(user)
         return [
             item
             for item in await self.list_all(include_agent_bound=True)
-            if resolve_skill_permission(user, item) != ResourcePermission.NONE
+            if resolve_skill_permission(user, item, granted=item.slug in granted) != ResourcePermission.NONE
         ]
 
     async def list_visible_for_management(self, user: User) -> list[Skill]:
         """返回可管理项和可读取的已启用项。"""
         visible = []
+        granted = await self._granted_slugs(user)
         for item in await self.list_all():
-            permission = resolve_skill_permission(user, item)
+            permission = resolve_skill_permission(user, item, granted=item.slug in granted)
             if permission == ResourcePermission.MANAGE or (item.enabled and permission != ResourcePermission.NONE):
                 visible.append(item)
         return visible

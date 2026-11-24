@@ -96,6 +96,11 @@ def test_update_mcp_server_status_rejects_legacy_stdio(monkeypatch):
 
 
 def test_get_mcp_servers_normal_user_is_stripped(monkeypatch):
+    async def fake_approved_slugs(db, *, user_id, resource_type):
+        return set()
+
+    monkeypatch.setattr("yuxi.api.routers.extensions.mcp.approved_slugs", fake_approved_slugs)
+
     class DummyServer:
         def __init__(self, slug="test-mcp"):
             self.slug = slug

@@ -13,9 +13,9 @@ def is_builtin_agent(agent: Agent) -> bool:
     return bool(getattr(agent, "is_builtin", False)) or agent.slug == DEFAULT_AGENT_SLUG
 
 
-def user_can_access_agent(user: User, agent: Agent) -> bool:
-    """按当前资源权限判断定义可见性。"""
-    return resolve_agent_permission(user, agent) != ResourcePermission.NONE
+def user_can_access_agent(user: User, agent: Agent, *, granted: bool = False) -> bool:
+    """按当前资源权限判断定义可见性；granted 表示已获批订阅。"""
+    return resolve_agent_permission(user, agent, granted=granted) != ResourcePermission.NONE
 
 
 def user_can_manage_agent(user: User, agent: Agent) -> bool:
@@ -25,8 +25,8 @@ def user_can_manage_agent(user: User, agent: Agent) -> bool:
     return resolve_agent_permission(user, agent) == ResourcePermission.MANAGE
 
 
-def user_can_run_agent(user: User, agent: Agent) -> bool:
-    """私有治理权限不赋予冒用所有者运行的能力。"""
+def user_can_run_agent(user: User, agent: Agent, *, granted: bool = False) -> bool:
+    """私有治理权限不赋予冒用所有者运行的能力；granted 表示已获批订阅。"""
     if agent.visibility == "private":
         return not user.is_deleted and user.user_kind != "end_user" and user.uid == agent.created_by
-    return user_can_access_agent(user, agent)
+    return user_can_access_agent(user, agent, granted=granted)

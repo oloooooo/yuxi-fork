@@ -258,8 +258,25 @@ def require_knowledge_base_permission(
     return actual
 
 
-def resolve_agent_permission(user: Any, resource: ShareableResource) -> ResourcePermission:
-    """私有定义只供所有者管理，系统管理员拥有治理权限。"""
+def _apply_grant(permission: ResourcePermission, granted: bool) -> ResourcePermission:
+    """订阅授权只在共享范围本来拒绝时补到只读，不改变已有权限。"""
+    if granted and permission == ResourcePermission.NONE:
+        return ResourcePermission.READ
+    return permission
+
+
+def resolve_agent_permission(
+    user: Any,
+    resource: ShareableResource,
+    *,
+    granted: bool = False,
+) -> ResourcePermission:
+    """私有定义只供所有者管理，系统管理员拥有治理权限；granted 表示已获批订阅。"""
+    permission = _resolve_agent_permission(user, resource)
+    return _apply_grant(permission, granted)
+
+
+def _resolve_agent_permission(user: Any, resource: ShareableResource) -> ResourcePermission:
     if _value(user, "is_deleted", 0):
         return ResourcePermission.NONE
     if _value(resource, "visibility") == "private":
@@ -280,8 +297,18 @@ def resolve_agent_permission(user: Any, resource: ShareableResource) -> Resource
     )
 
 
-def resolve_skill_permission(user: Any, resource: ShareableResource) -> ResourcePermission:
-    """解析 Skill 权限。"""
+def resolve_skill_permission(
+    user: Any,
+    resource: ShareableResource,
+    *,
+    granted: bool = False,
+) -> ResourcePermission:
+    """解析 Skill 权限；granted 表示已获批订阅。"""
+    permission = _resolve_skill_permission(user, resource)
+    return _apply_grant(permission, granted)
+
+
+def _resolve_skill_permission(user: Any, resource: ShareableResource) -> ResourcePermission:
 
     if _value(resource, "bound_agent_id") is not None:
         agent = _value(resource, "bound_agent")
@@ -312,8 +339,18 @@ def resolve_skill_permission(user: Any, resource: ShareableResource) -> Resource
     return permission
 
 
-def resolve_mcp_permission(user: Any, resource: ShareableResource) -> ResourcePermission:
-    """解析连接器权限：管理员治理全部连接器，其他用户按共享范围只读。"""
+def resolve_mcp_permission(
+    user: Any,
+    resource: ShareableResource,
+    *,
+    granted: bool = False,
+) -> ResourcePermission:
+    """解析连接器权限：管理员治理全部连接器，其他用户按共享范围只读；granted 表示已获批订阅。"""
+    permission = _resolve_mcp_permission(user, resource)
+    return _apply_grant(permission, granted)
+
+
+def _resolve_mcp_permission(user: Any, resource: ShareableResource) -> ResourcePermission:
     if _value(user, "is_deleted", 0):
         return ResourcePermission.NONE
     if _value(user, "role") in ADMIN_ROLES:
