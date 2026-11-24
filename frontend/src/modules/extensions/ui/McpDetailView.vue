@@ -33,7 +33,7 @@
             <span>测试</span>
           </a-button>
           <a-button
-            v-if="userStore.isSuperAdmin"
+            v-if="server?.can_edit_config"
             type="text"
             aria-label="编辑连接器"
             @click="startEdit"
@@ -68,7 +68,7 @@
 
     <template #panel-general>
       <div class="extension-detail-view mcp-general-view">
-        <McpFormModal v-model:open="isEditing" :edit-mode="true" :edit-data="server" @submitted="fetchServer" />
+        <McpFormModal v-model:open="isEditing" :edit-mode="true" :edit-data="server" :auth-editable="userStore.isSuperAdmin" @submitted="fetchServer" />
         <McpConnectionControls :server="server" @changed="fetchServer" />
 
         <section v-if="server.origin_skill || dependentCount" class="mcp-info-section" aria-label="依赖关系">

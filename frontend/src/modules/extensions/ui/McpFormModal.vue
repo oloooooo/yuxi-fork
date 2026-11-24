@@ -49,12 +49,13 @@
           <a-input id="mcp-form-url" v-model:value="form.url" placeholder="https://example.com/mcp" />
         </a-form-item>
         <a-form-item label="传输方式" html-for="mcp-form-transport" required class="form-item">
-          <a-select id="mcp-form-transport" v-model:value="form.transport">
+          <a-select id="mcp-form-transport" v-model:value="form.transport" :disabled="editMode && !authEditable">
             <a-select-option value="http">Streamable HTTP</a-select-option>
             <a-select-option value="sse">SSE</a-select-option>
           </a-select>
         </a-form-item>
       </div>
+      <template v-if="authEditable || authUnlocked">
       <a-form-item label="接入方式" html-for="mcp-oauth-auth-mode" required>
         <a-select id="mcp-oauth-auth-mode" v-model:value="form.auth_mode" placeholder="请选择接入方式">
           <a-select-option value="none">无需认证</a-select-option>
@@ -100,6 +101,15 @@
         </div>
         <a-form-item label="授权范围" html-for="mcp-oauth-scopes"><a-input id="mcp-oauth-scopes" v-model:value="form.scopes" placeholder="空格分隔的 scopes" /></a-form-item>
       </template>
+      </template>
+      <div v-else class="form-item">
+        <label>接入方式</label>
+        <div class="mcp-auth-locked">
+          <span>{{ authModeLabel }}（已配置，不可查看）</span>
+          <a-button size="small" @click="authUnlocked = true">重置认证</a-button>
+        </div>
+        <p class="form-hint">只改地址、超时等字段时直接保存；点击「重置认证」需完整填写新的接入方式与凭据。</p>
+      </div>
       <a-form-item v-if="!editMode" label="共享范围" class="form-item">
         <ShareConfigForm
           v-model="form.shareConfig"
@@ -163,13 +173,15 @@ const allowedAccessLevels = computed(() =>
 const props = defineProps({
   open: { type: Boolean, default: false },
   editMode: { type: Boolean, default: false },
-  editData: { type: Object, default: null }
+  editData: { type: Object, default: null },
+  authEditable: { type: Boolean, default: true }
 })
 
 const emit = defineEmits(['update:open', 'submitted'])
 
 const formLoading = ref(false)
 const connectionOptionsOpen = ref(false)
+const authUnlocked = ref(false)
 
 const visible = computed({
   get: () => props.open,
@@ -215,6 +227,10 @@ const authDescription = computed(() => ({
   oauth: '管理员登记应用信息，每位用户在连接器卡片登录并授权自己的服务账号。',
   headers: '管理员在下方填写凭证。所有人的请求都会使用这组请求头，访问同一个服务账号。',
 })[form.auth_mode])
+const authModeLabel = computed(() => ({
+  headers: '共享请求头', bearer: '用户各自填写 Bearer Token', api_key: '用户各自填写 API Key',
+  oauth: '用户各自 OAuth 授权', none: '无需认证',
+})[form.auth_mode] || form.auth_mode || '未配置')
 const clearsSharedHeaders = computed(() => props.editMode && (props.editData?.auth_mode || 'headers') === 'headers' && ['none', 'bearer', 'api_key', 'oauth'].includes(form.auth_mode))
 
 watch(() => form.auth_mode, (mode, previous) => {
@@ -224,6 +240,7 @@ watch(() => form.auth_mode, (mode, previous) => {
 watch(
   () => props.open,
   (val) => {
+    if (val) authUnlocked.value = false
     if (val) connectionOptionsOpen.value = props.editMode
     if (val && props.editData) {
       Object.assign(form, {
@@ -261,7 +278,7 @@ const handleFormSubmit = async () => {
         message.error('请求头 JSON 格式错误')
         return
       }
-    } else if (props.editMode) {
+    } else if (props.editMode && (props.authEditable || authUnlocked.value)) {
       headers = {}
     }
     if (!form.slug?.trim()) {
@@ -303,9 +320,15 @@ const handleFormSubmit = async () => {
       }
     }
     const [data] = parseMcpManifest(JSON.stringify({ mcpServers: { [form.slug]: entry } }))
-    data.auth_mode = form.auth_mode
-    if (form.auth_mode === 'api_key') data.api_key_header = form.api_key_header
-    if (form.auth_mode === 'oauth') {
+    const authWritable = props.authEditable || authUnlocked.value
+    if (!props.authEditable) delete data.transport
+    if (!authWritable) {
+      delete data.auth_mode
+    } else {
+      data.auth_mode = form.auth_mode
+    }
+    if (authWritable && form.auth_mode === 'api_key') data.api_key_header = form.api_key_header
+    if (authWritable && form.auth_mode === 'oauth') {
       data.oauth_config = {
         issuer_url: form.issuer_url, registration: form.registration, client_id: form.client_id,
         scopes: form.scopes,
@@ -319,6 +342,7 @@ const handleFormSubmit = async () => {
     let submitted
     if (props.editMode) {
       const { slug, ...updateData } = data
+      if (!props.authEditable && authUnlocked.value) updateData.reset_auth = true
       const result = await mcpApi.updateMcpServer(props.editData?.slug || slug, updateData)
       if (result.success) {
         submitted = result.data
@@ -382,6 +406,18 @@ const handleFormSubmit = async () => {
 
   :deep(.ant-input-number), :deep(.ant-select) { width: 100%; }
   :deep(.ant-form-item-label > label) { color: var(--gray-800); font-size: 13px; }
+}
+
+.mcp-auth-locked {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--gray-200, #e5e7eb);
+  border-radius: 8px;
+  color: var(--gray-700);
+  font-size: 13px;
 }
 
 .mcp-share-hint {

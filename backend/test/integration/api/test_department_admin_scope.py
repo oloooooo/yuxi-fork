@@ -121,3 +121,80 @@ async def test_department_admin_governs_only_own_department_connectors(test_clie
             await test_client.delete(f"/api/system/mcp-servers/{slug}", headers=admin_headers)
         await delete_department_by_id(test_client, admin_headers, department_id)
         await delete_department_by_id(test_client, admin_headers, other_department_id)
+
+
+
+async def test_creator_admin_edits_non_sensitive_fields_and_resets_auth_only(test_client, admin_headers):
+    """创建者可改地址/超时/描述，认证只能整体重置；非创建者管理员不能改。"""
+    suffix = uuid.uuid4().hex[:6]
+    department, creator_headers = await _create_department_with_admin(
+        test_client, admin_headers, f"it-edit-dept-{suffix}"
+    )
+    other_department, peer_headers = await _create_department_with_admin(
+        test_client, admin_headers, f"it-edit-peer-{suffix}"
+    )
+    department_id = department["id"]
+    slug = f"it-edit-{suffix}"
+    created = await test_client.post(
+        "/api/system/mcp-servers",
+        headers=creator_headers,
+        json={
+            "slug": slug,
+            "name": f"IT {slug}",
+            "transport": "streamable_http",
+            "url": "https://example.com/mcp",
+            "headers": {"Authorization": "Bearer old-token"},
+            "auth_mode": "headers",
+            "timeout": 5,
+            "sse_read_timeout": 5,
+            "share_config": _share("department", department_ids=[department_id]),
+        },
+    )
+    assert created.status_code == 200, created.text
+    try:
+        detail = await _read_connector(test_client, creator_headers, slug)
+        assert detail["can_edit_config"] is True
+        assert detail["url"] == "https://example.com/mcp"
+        assert "headers" not in detail, "共享请求头不能回填给非超管"
+
+        updated = await test_client.put(
+            f"/api/system/mcp-servers/{slug}",
+            headers=creator_headers,
+            json={"description": "改过", "url": "https://example.com/mcp-v2", "timeout": 9},
+        )
+        assert updated.status_code == 200, updated.text
+        after = updated.json()["data"]
+        assert after["description"] == "改过" and after["url"] == "https://example.com/mcp-v2"
+        assert after["timeout"] == 9
+        assert (await _read_connector(test_client, admin_headers, slug))["headers"] == {
+            "Authorization": "Bearer old-token"
+        }, "未触碰认证时不应清空共享请求头"
+
+        denied_headers = await test_client.put(
+            f"/api/system/mcp-servers/{slug}",
+            headers=creator_headers,
+            json={"headers": {"Authorization": "Bearer leaked"}},
+        )
+        assert denied_headers.status_code == 403, denied_headers.text
+        denied_transport = await test_client.put(
+            f"/api/system/mcp-servers/{slug}", headers=creator_headers, json={"transport": "sse"}
+        )
+        assert denied_transport.status_code == 403, denied_transport.text
+
+        reset = await test_client.put(
+            f"/api/system/mcp-servers/{slug}",
+            headers=creator_headers,
+            json={"reset_auth": True, "auth_mode": "none", "headers": {}},
+        )
+        assert reset.status_code == 200, reset.text
+        assert reset.json()["data"]["auth_mode"] == "none"
+        assert (await _read_connector(test_client, admin_headers, slug))["headers"] == {}
+
+        denied_peer = await test_client.put(
+            f"/api/system/mcp-servers/{slug}", headers=peer_headers, json={"description": "peer"}
+        )
+        assert denied_peer.status_code in {403, 404}, denied_peer.text
+    finally:
+        await test_client.delete(f"/api/system/mcp-servers/{slug}", headers=admin_headers)
+        await delete_department_by_id(test_client, admin_headers, department_id)
+        await delete_department_by_id(test_client, admin_headers, other_department["id"])

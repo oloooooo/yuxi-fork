@@ -70,6 +70,7 @@ class UpdateMcpServerRequest(BaseModel):
     headers: dict | None = Field(None, description="HTTP 请求头")
     timeout: StrictInt | None = Field(None, description="HTTP 超时时间（秒）")
     sse_read_timeout: StrictInt | None = Field(None, description="SSE 读取超时（秒）")
+    reset_auth: bool = Field(False, description="非超管创建者整体重置认证配置时置真")
 
 
 class UpdateMcpServerStatusRequest(BaseModel):
@@ -210,13 +211,28 @@ async def get_mcp_server_dependents_route(
 async def update_mcp_server_route(
     slug: str,
     request: UpdateMcpServerRequest,
-    current_user: User = Depends(get_superadmin_user),
+    current_user: User = Depends(get_required_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """更新 MCP 服务器配置"""
+    """更新 MCP 服务器配置；创建者可改地址/超时等非敏感字段，认证只能整体重置。"""
     valid_transports = ("sse", "streamable_http")
     if request.transport is not None and request.transport not in valid_transports:
         raise HTTPException(status_code=400, detail=f"传输类型必须是 {', '.join(valid_transports)} 之一")
+
+    server = await get_server_or_404(db, slug)
+    is_superadmin = current_user.role == "superadmin"
+    can_edit_config = is_superadmin or (
+        server.created_by == current_user.uid
+        and resolve_mcp_permission(current_user, server) == ResourcePermission.MANAGE
+    )
+    if not can_edit_config:
+        raise HTTPException(status_code=403, detail="只有创建者或超级管理员可以修改该连接器")
+    if not is_superadmin:
+        if request.transport is not None:
+            raise HTTPException(status_code=403, detail="只有超级管理员可以修改传输方式")
+        auth_fields = (request.auth_mode, request.headers, request.api_key_header, request.oauth_config)
+        if not request.reset_auth and any(field is not None for field in auth_fields):
+            raise HTTPException(status_code=403, detail="认证配置不能回填修改，请使用整体重置")
 
     try:
         server = await update_mcp_server(
@@ -230,9 +246,10 @@ async def update_mcp_server_route(
             timeout=request.timeout,
             sse_read_timeout=request.sse_read_timeout,
             updated_by=current_user.username,
-            auth_mode=request.auth_mode,
-            oauth_config=request.oauth_config,
-            api_key_header=request.api_key_header,
+            auth_mode=request.auth_mode if is_superadmin or request.reset_auth else None,
+            oauth_config=request.oauth_config if is_superadmin or request.reset_auth else None,
+            api_key_header=request.api_key_header if is_superadmin or request.reset_auth else None,
+            auth_untouched=not is_superadmin and not request.reset_auth,
         )
         return {"success": True, "data": serialize_mcp_server(server, current_user)}
     except HTTPException:
@@ -458,14 +475,19 @@ async def get_server_or_404(db: AsyncSession, slug: str):
 
 
 def serialize_mcp_server(server, current_user: User) -> dict:
-    """序列化 MCP，补充权限与内置标识；非超管不返回连接地址与共享请求头。"""
+    """序列化 MCP；创建者可见地址以便编辑，共享请求头始终只给超管。"""
     data = server.to_dict()
-    if current_user.role != "superadmin":
-        data.pop("url", None)
+    is_superadmin = current_user.role == "superadmin"
+    permission = resolve_mcp_permission(current_user, server)
+    is_creator = not is_superadmin and server.created_by == current_user.uid and permission == ResourcePermission.MANAGE
+    if not is_superadmin:
         data.pop("headers", None)
+        if not is_creator:
+            data.pop("url", None)
     if data.get("auth_mode") in STATIC_AUTH_MODES:
         data["config_revision"] = config_revision(server)
-    data["can_manage"] = resolve_mcp_permission(current_user, server) == ResourcePermission.MANAGE
+    data["can_manage"] = permission == ResourcePermission.MANAGE
+    data["can_edit_config"] = is_superadmin or is_creator
     data["is_builtin"] = is_builtin_mcp_server(server)
     data["allowed_access_levels"] = allowed_mcp_access_levels(current_user)
     return data

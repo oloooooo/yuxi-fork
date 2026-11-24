@@ -404,8 +404,12 @@ async def update_mcp_server(
     auth_mode: str | None = None,
     oauth_config: dict | None = None,
     api_key_header: str | None = None,
+    auth_untouched: bool = False,
 ) -> MCPServer:
-    """在服务锁内更新配置，并使旧修订的个人连接失效。"""
+    """在服务锁内更新配置，并使旧修订的个人连接失效。
+
+    auth_untouched 为真时不动认证字段，避免只改地址却清掉 OAuth 或个人凭证配置。
+    """
     server = await get_mcp_server(db, slug, lock=True)
     if not server:
         raise MCPServerNotFoundError(f"Server '{slug}' does not exist")
@@ -434,7 +438,8 @@ async def update_mcp_server(
     if updated_by is not None:
         server.updated_by = updated_by
 
-    configure_mcp_auth(server, auth_mode or server.auth_mode or "headers", oauth_config, api_key_header)
+    if not auth_untouched:
+        configure_mcp_auth(server, auth_mode or server.auth_mode or "headers", oauth_config, api_key_header)
     if config_revision(server) != previous_revision:
         await invalidate_mcp_connections(db, server.id)
     await db.commit()

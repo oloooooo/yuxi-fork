@@ -220,9 +220,18 @@ def test_mcp_server_rejects_unsupported_configuration(method, path, payload):
 
 
 def test_update_builtin_mcp_server_rejects_connection_changes(monkeypatch):
+    class DummyServer:
+        slug = "deepwiki-official"
+        created_by = "admin"
+        share_config = {"version": 2, "read_scope": {"access_level": "global"}, "manage_scope": None}
+
+    async def fake_get_mcp_server(db, slug, **_):
+        return DummyServer()
+
     async def fake_update_mcp_server(db, slug, **kwargs):
         raise PermissionError("系统内置连接器的连接配置由代码管理，无法通过接口修改")
 
+    monkeypatch.setattr("yuxi.api.routers.extensions.mcp.get_mcp_server", fake_get_mcp_server)
     monkeypatch.setattr("yuxi.api.routers.extensions.mcp.update_mcp_server", fake_update_mcp_server)
 
     client = TestClient(_build_app())
@@ -238,9 +247,13 @@ def test_update_builtin_mcp_server_rejects_connection_changes(monkeypatch):
 
 
 def test_update_mcp_server_not_found(monkeypatch):
+    async def fake_get_mcp_server(db, slug, **_):
+        return None
+
     async def fake_update_mcp_server(db, slug, **kwargs):
         raise MCPServerNotFoundError(f"Server '{slug}' does not exist")
 
+    monkeypatch.setattr("yuxi.api.routers.extensions.mcp.get_mcp_server", fake_get_mcp_server)
     monkeypatch.setattr("yuxi.api.routers.extensions.mcp.update_mcp_server", fake_update_mcp_server)
 
     client = TestClient(_build_app())
