@@ -11,11 +11,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from yuxi.api.dependencies.auth import get_admin_user, get_db, get_required_user, get_superadmin_user
 from yuxi.infrastructure.observability.logging import logger
 from yuxi.modules.extensions.skills.access import (
+    default_skill_share_config,
     get_allowed_skill_access_levels,
     get_manageable_skill_or_raise,
     get_management_readable_skill_or_raise,
     is_builtin_skill,
-    normalize_skill_share_config,
     user_can_manage_skill,
 )
 from yuxi.modules.extensions.skills.builtin.sync import init_builtin_skills
@@ -195,7 +195,7 @@ async def create_uploaded_skill_draft_route(
         )
         allowed = get_allowed_skill_access_levels(current_user)
         data["allowed_access_levels"] = allowed
-        data["default_share_config"] = normalize_skill_share_config(None, operator_uid=current_user.uid, allowed_access_levels=set(allowed))
+        data["default_share_config"] = default_skill_share_config(current_user)
         return {"success": True, "data": data}
     except ValueError as e:
         _raise_from_value_error(e)
@@ -248,7 +248,7 @@ async def prepare_remote_skills_route(
         )
         allowed = get_allowed_skill_access_levels(current_user)
         data["allowed_access_levels"] = allowed
-        data["default_share_config"] = normalize_skill_share_config(None, operator_uid=current_user.uid, allowed_access_levels=set(allowed))
+        data["default_share_config"] = default_skill_share_config(current_user)
         return {"success": True, "data": data}
     except ValueError as e:
         _raise_from_value_error(e)

@@ -57,7 +57,7 @@ def _skill_for_user(uid: str) -> Skill:
 @pytest.mark.parametrize(
     ("role", "can_manage", "allowed_access_levels"),
     [
-        ("admin", True, ["global", "department", "user"]),
+        ("admin", True, ["department", "user"]),
         ("user", False, ["user"]),
     ],
     ids=["admin", "user"],

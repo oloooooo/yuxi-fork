@@ -190,14 +190,21 @@ function createEmptyForm() {
     sse_read_timeout: null,
     shareConfig: {
       version: 2,
-      read_scope: {
-        access_level: userStore.isSuperAdmin ? 'global' : 'user',
-        department_ids: [],
-        user_uids: userStore.isSuperAdmin ? [] : [userStore.uid].filter(Boolean)
-      },
+      read_scope: defaultShareScope(),
       manage_scope: null
     },
   }
+}
+
+/** 新建连接器的默认可见范围：超管全平台、部门管理员本部门、其他人仅本人。 */
+function defaultShareScope() {
+  if (userStore.isSuperAdmin) {
+    return { access_level: 'global', department_ids: [], user_uids: [] }
+  }
+  if (userStore.isAdmin && userStore.departmentId) {
+    return { access_level: 'department', department_ids: [userStore.departmentId], user_uids: [] }
+  }
+  return { access_level: 'user', department_ids: [], user_uids: [userStore.uid].filter(Boolean) }
 }
 
 const form = reactive(createEmptyForm())

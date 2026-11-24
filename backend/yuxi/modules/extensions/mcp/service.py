@@ -70,12 +70,15 @@ def allowed_mcp_access_levels(user) -> list[str]:
 
 
 def default_mcp_share_config(user) -> dict:
-    """新连接器默认范围：超管全平台，管理员仅本人。"""
-    scope = (
-        {"access_level": "global", "department_ids": [], "user_uids": []}
-        if getattr(user, "role", None) == "superadmin"
-        else {"access_level": "user", "department_ids": [], "user_uids": [user.uid]}
-    )
+    """新连接器默认范围：超管全平台，管理员本部门，其他角色仅本人。"""
+    role = getattr(user, "role", None)
+    department_id = getattr(user, "department_id", None)
+    if role == "superadmin":
+        scope = {"access_level": "global", "department_ids": [], "user_uids": []}
+    elif role == "admin" and department_id is not None:
+        scope = {"access_level": "department", "department_ids": [department_id], "user_uids": []}
+    else:
+        scope = {"access_level": "user", "department_ids": [], "user_uids": [user.uid]}
     return {"version": 2, "read_scope": scope, "manage_scope": None}
 
 

@@ -26,6 +26,13 @@ from yuxi.modules.agents.models.sessions import Session
 from yuxi.infrastructure.postgres.base import Base
 from test.support.sqlite import create_utc_sqlite_engine
 
+DEPARTMENT_SHARE_CONFIG = {
+    "version": 2,
+    "read_scope": {"access_level": "department", "department_ids": [9], "user_uids": []},
+    "manage_scope": None,
+}
+
+
 
 class FakeDb:
     def __init__(self):
@@ -315,22 +322,29 @@ async def test_normal_user_cannot_update_private_agent_grants():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("role,owner", [("admin", "manager"), ("superadmin", "owner")])
-async def test_share_private_agent_updates_same_definition(role, owner):
+@pytest.mark.parametrize(
+    ("role", "owner", "share_config"),
+    [
+        ("admin", "manager", DEPARTMENT_SHARE_CONFIG),
+        ("superadmin", "owner", DEFAULT_SHARE_CONFIG),
+    ],
+    ids=["admin-own-department", "superadmin-global"],
+)
+async def test_share_private_agent_updates_same_definition(role, owner, share_config):
     """管理员原地共享定义，保留所有者和完整配置。"""
     db = FakeDb()
     agent = _agent_for_update(created_by=owner)
     agent.id, agent.visibility = 1, "private"
     agent.config_json = {"context": {"system_prompt": "original", "skills": ["existing"]}}
-    user = User(uid="manager", role=role, user_kind="human", is_deleted=0)
+    user = User(uid="manager", role=role, department_id=9, user_kind="human", is_deleted=0)
     db.scalar = AsyncMock(side_effect=[agent, user])
 
-    updated = await update_agent_definition(db, agent, visibility="shared", share_config=DEFAULT_SHARE_CONFIG, updater=user)
+    updated = await update_agent_definition(db, agent, visibility="shared", share_config=share_config, updater=user)
 
     assert updated is agent
     assert (agent.id, agent.slug, agent.created_by, agent.visibility) == (1, "shared-bot", owner, "shared")
     assert agent.config_json == {"context": {"system_prompt": "original", "skills": ["existing"]}}
-    assert agent.share_config == DEFAULT_SHARE_CONFIG
+    assert agent.share_config == share_config
 
 
 @pytest.mark.asyncio

@@ -37,9 +37,17 @@ def test_superadmin_manages_every_connector():
     assert resolve_mcp_permission(_user(role="superadmin"), _server()) == ResourcePermission.MANAGE
 
 
-def test_admin_manages_connector_created_by_superadmin():
+def test_admin_reads_global_connector_but_cannot_manage_it():
     server = _server(_scope("global"), created_by="superadmin")
-    assert resolve_mcp_permission(_user(uid="admin-1", role="admin"), server) == ResourcePermission.MANAGE
+    assert resolve_mcp_permission(_user(uid="admin-1", role="admin"), server) == ResourcePermission.READ
+
+
+def test_admin_manages_own_department_connector():
+    server = _server(_scope("department", department_ids=[1]), created_by="superadmin")
+    admin = _user(uid="admin-1", role="admin", department_id=1)
+    assert resolve_mcp_permission(admin, server) == ResourcePermission.MANAGE
+    other = _user(uid="admin-2", role="admin", department_id=2)
+    assert resolve_mcp_permission(other, server) == ResourcePermission.NONE
 
 
 def test_user_reads_global_but_not_other_users_scope():
@@ -69,9 +77,9 @@ def test_admin_cannot_share_connector_globally():
         normalize_mcp_share_config(_scope("global"), operator=_user(role="admin"))
 
 
-def test_admin_default_scope_is_self_only():
-    config = normalize_mcp_share_config(None, operator=_user(uid="admin-1", role="admin"))
-    assert config["read_scope"] == {"access_level": "user", "department_ids": [], "user_uids": ["admin-1"]}
+def test_admin_default_scope_is_own_department():
+    config = normalize_mcp_share_config(None, operator=_user(uid="admin-1", role="admin", department_id=3))
+    assert config["read_scope"] == {"access_level": "department", "department_ids": [3], "user_uids": []}
 
 
 def test_superadmin_can_share_connector_globally():
@@ -104,8 +112,13 @@ def test_serialize_hides_connection_details_from_admin():
     server = _server(_scope("global"))
     server.headers = {"Authorization": "Bearer secret"}
     admin_view = serialize_mcp_server(server, _user(role="admin"))
-    assert admin_view["can_manage"] is True
+    assert admin_view["can_manage"] is False
     assert "url" not in admin_view and "headers" not in admin_view
+
+    department_view = serialize_mcp_server(
+        _server(_scope("department", department_ids=[1])), _user(role="admin", department_id=1)
+    )
+    assert department_view["can_manage"] is True
 
     superadmin_view = serialize_mcp_server(server, _user(role="superadmin"))
     assert superadmin_view["url"] == "https://example.com/mcp"

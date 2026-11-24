@@ -1,14 +1,20 @@
 """共享范围写入的身份校验。"""
 
+from collections.abc import Collection
+
 from sqlalchemy import select
 
 from yuxi.modules.identity.models import User
 from yuxi.modules.identity.permissions import normalize_permission_config
 
 
-async def validate_shared_grants(db, share_config: dict) -> dict:
-    """校验范围包含关系和指定管理者的当前角色。"""
-    config = normalize_permission_config(share_config, strict=True)
+async def validate_shared_grants(
+    db, share_config: dict, *, allowed_access_levels: Collection[str] | None = None
+) -> dict:
+    """校验范围包含关系、可选级别上限和指定管理者的当前角色。"""
+    config = normalize_permission_config(
+        share_config, strict=True, allowed_access_levels=allowed_access_levels
+    )
     scope = config["manage_scope"]
     if scope and scope["access_level"] == "user":
         result = await db.execute(

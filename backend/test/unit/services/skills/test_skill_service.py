@@ -105,8 +105,8 @@ def _build_zip(files: dict[str, str]) -> bytes:
     return buf.getvalue()
 
 
-def _user(uid: str = "root", role: str = "admin") -> User:
-    return User(username=uid, uid=uid, password_hash="x", role=role, department_id=1)
+def _user(uid: str = "root", role: str = "admin", department_id: int = 1) -> User:
+    return User(username=uid, uid=uid, password_hash="x", role=role, department_id=department_id)
 
 
 def _fake_skill_repository(monkeypatch, target=svc, *, existing_slugs=(), methods=None):
@@ -195,9 +195,30 @@ def _isolated_skill_storage(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
 
 
 
+def test_admin_cannot_share_skill_globally():
+    """管理员只能把技能共享给本部门或指定用户。"""
+    config = {
+        "version": 2,
+        "read_scope": {"access_level": "global", "department_ids": [], "user_uids": []},
+        "manage_scope": None,
+    }
+    with pytest.raises(ValueError, match="共享范围"):
+        skill_access.normalize_skill_share_config(
+            config,
+            operator_uid="other",
+            allowed_access_levels=set(skill_access.get_allowed_skill_access_levels(_user(role="admin"))),
+        )
+
+
+def test_admin_default_skill_scope_is_own_department():
+    """管理员上传的共享技能默认本部门可见。"""
+    config = skill_access.default_skill_share_config(_user(role="admin", department_id=3))
+    assert config["read_scope"] == {"access_level": "department", "department_ids": [3], "user_uids": []}
+
+
 def test_allowed_skill_access_levels_by_role():
     assert svc.get_allowed_skill_access_levels(_user(role="user")) == ["user"]
-    assert svc.get_allowed_skill_access_levels(_user(role="admin")) == ["global", "department", "user"]
+    assert svc.get_allowed_skill_access_levels(_user(role="admin")) == ["department", "user"]
     assert svc.get_allowed_skill_access_levels(_user(role="superadmin")) == ["global", "department", "user"]
 
 

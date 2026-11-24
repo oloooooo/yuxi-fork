@@ -185,6 +185,17 @@ def _minimum_permission(left: ResourcePermission, right: ResourcePermission) -> 
     return left if RESOURCE_PERMISSION_ORDER[left] <= RESOURCE_PERMISSION_ORDER[right] else right
 
 
+def _administers_department(user: Any, read_scope: dict[str, Any] | None) -> bool:
+    """判断用户是否是该部门共享范围的管理员。"""
+
+    if not read_scope or read_scope.get("access_level") != "department":
+        return False
+    department_id = _value(user, "department_id")
+    if department_id is None:
+        return False
+    return str(department_id) in {str(item) for item in read_scope.get("department_ids") or []}
+
+
 def resolve_resource_permission(
     user: Any,
     resource: ShareableResource,
@@ -221,6 +232,9 @@ def resolve_resource_permission(
         granted = ResourcePermission.READ
     else:
         granted = ResourcePermission.NONE
+    if _value(user, "role") == "admin" and _administers_department(user, config["read_scope"]):
+        # 部门管理员治理本部门共享的资源；全平台资源仍按读取范围处理。
+        granted = ResourcePermission.MANAGE
 
     ceiling = policy.role_ceiling.get(_value(user, "role"), ResourcePermission.READ)
     return _minimum_permission(granted, ceiling)
@@ -345,7 +359,7 @@ def resolve_mcp_permission(
     *,
     granted: bool = False,
 ) -> ResourcePermission:
-    """解析连接器权限：管理员治理全部连接器，其他用户按共享范围只读；granted 表示已获批订阅。"""
+    """解析连接器权限：部门管理员治理本部门共享的连接器，其他按共享范围只读；granted 表示已获批订阅。"""
     permission = _resolve_mcp_permission(user, resource)
     return _apply_grant(permission, granted)
 
@@ -353,7 +367,7 @@ def resolve_mcp_permission(
 def _resolve_mcp_permission(user: Any, resource: ShareableResource) -> ResourcePermission:
     if _value(user, "is_deleted", 0):
         return ResourcePermission.NONE
-    if _value(user, "role") in ADMIN_ROLES:
+    if _value(user, "role") == "superadmin":
         return ResourcePermission.MANAGE
     if _value(resource, "share_config") is None:
         # 未写共享范围的存量连接器保持全平台可读

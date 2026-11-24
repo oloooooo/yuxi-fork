@@ -233,9 +233,14 @@ const isAgentShared = computed(() => agentForm.visibility === 'shared')
 const canToggleAgentSharing = computed(
   () => !editingAgentId.value || editingCapabilities.value.visibility === 'private'
 )
+const agentScopeLocked = computed(() => {
+  const level = agentShareConfig.value?.read_scope?.access_level
+  return Boolean(level) && !getAgentShareAllowedLevels().includes(level)
+})
+
 const getAgentShareAllowedLevels = () => {
   if (isEditingBuiltinAgent.value) return ['global']
-  if (userStore.isAdmin) return ['global', 'department', 'user']
+  if (userStore.isAdmin) return ['department', 'user']
   return ['user']
 }
 
@@ -759,11 +764,18 @@ defineExpose({
           <CollapseTransition>
             <div v-if="!editingAgentId && canEditAgentShareConfig && isAgentShared" ref="shareConfigHeadingRef" tabindex="-1" aria-label="共享权限" class="create-sharing-section">
               <ShareConfigForm
+                v-if="!agentScopeLocked"
                 ref="agentShareConfigFormRef"
                 v-model="agentShareConfig"
                 :disabled="saving || resourceCreationOpen || createOutcomeUnknown"
                 :auto-select-user-dept="true"
                 :allowed-access-levels="getAgentShareAllowedLevels()"
+              />
+              <a-alert
+                v-else
+                type="info"
+                show-icon
+                message="当前为全平台共享，只有超级管理员可以调整。"
               />
             </div>
           </CollapseTransition>
@@ -781,11 +793,18 @@ defineExpose({
             <CollapseTransition>
               <div v-if="isAgentShared" class="agent-sharing-options">
                 <ShareConfigForm
+                  v-if="!agentScopeLocked"
                   ref="agentShareConfigFormRef"
                   v-model="agentShareConfig"
                   :disabled="saving || resourceCreationOpen || createOutcomeUnknown"
                   :auto-select-user-dept="true"
                   :allowed-access-levels="getAgentShareAllowedLevels()"
+                />
+                <a-alert
+                  v-else
+                  type="info"
+                  show-icon
+                  message="当前为全平台共享，只有超级管理员可以调整。"
                 />
               </div>
             </CollapseTransition>

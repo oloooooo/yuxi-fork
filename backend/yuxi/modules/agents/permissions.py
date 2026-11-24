@@ -30,3 +30,28 @@ def user_can_run_agent(user: User, agent: Agent, *, granted: bool = False) -> bo
     if agent.visibility == "private":
         return not user.is_deleted and user.user_kind != "end_user" and user.uid == agent.created_by
     return user_can_access_agent(user, agent, granted=granted)
+
+
+def allowed_agent_access_levels(user) -> list[str]:
+    """智能体共享范围上限：超管全平台，管理员部门及指定人，其他仅本人。"""
+    role = getattr(user, "role", None)
+    if role == "superadmin":
+        return ["global", "department", "user"]
+    if role == "admin":
+        return ["department", "user"]
+    return ["user"]
+
+
+def default_agent_share_config(user) -> dict:
+    """智能体默认共享范围：超管全平台，管理员本部门，其他仅本人。"""
+    if getattr(user, "role", None) == "superadmin":
+        read_scope = {"access_level": "global", "department_ids": [], "user_uids": []}
+    elif getattr(user, "role", None) == "admin" and getattr(user, "department_id", None) is not None:
+        read_scope = {
+            "access_level": "department",
+            "department_ids": [user.department_id],
+            "user_uids": [],
+        }
+    else:
+        read_scope = {"access_level": "user", "department_ids": [], "user_uids": [user.uid]}
+    return {"version": 2, "read_scope": read_scope, "manage_scope": None}

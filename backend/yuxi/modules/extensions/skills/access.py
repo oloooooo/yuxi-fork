@@ -247,10 +247,23 @@ def reject_bound_skill_policy_change(item: Skill) -> None:
 
 
 def get_allowed_skill_access_levels(user: User) -> list[str]:
-    """返回操作人可设定的共享范围。"""
-    if user.role in ADMIN_ROLES:
+    """返回操作人可设定的共享范围：超管全平台，管理员部门及指定人。"""
+    if user.role == "superadmin":
         return ["global", "department", "user"]
+    if user.role in ADMIN_ROLES:
+        return ["department", "user"]
     return ["user"]
+
+
+def default_skill_share_config(user: User) -> dict:
+    """技能上传默认范围：超管全平台，管理员本部门，其他角色仅本人。"""
+    if user.role == "superadmin":
+        read_scope = {"access_level": "global", "department_ids": [], "user_uids": []}
+    elif user.role in ADMIN_ROLES and user.department_id is not None:
+        read_scope = {"access_level": "department", "department_ids": [user.department_id], "user_uids": []}
+    else:
+        read_scope = {"access_level": "user", "department_ids": [], "user_uids": [user.uid]}
+    return {"version": 2, "read_scope": read_scope, "manage_scope": None}
 
 
 def user_can_access_skill(user: User, skill: Skill) -> bool:
