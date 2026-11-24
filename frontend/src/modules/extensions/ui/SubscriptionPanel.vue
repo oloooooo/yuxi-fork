@@ -28,6 +28,13 @@
                 >
                   申请订阅
                 </a-button>
+                <a-button
+                  v-else-if="item.status === 'rejected'"
+                  size="small"
+                  @click="apply(item)"
+                >
+                  重新申请
+                </a-button>
                 <a-tag v-else-if="item.visible" color="green">已可用</a-tag>
               </a-list-item>
             </template>

@@ -6,7 +6,7 @@
 
 1. 打开扩展 → 订阅 → 资源目录。目录列出连接器、智能体、Skill 的名称、描述与标识，`已可用` 表示当前共享范围已经放行。
 2. 对不可用资源点「申请订阅」。待审批期间该资源显示「待审批」。
-3. 在「我的申请」查看状态；已批准的订阅可以撤销，撤销后立即失去访问权限。
+3. 在「我的申请」查看状态；已批准的订阅可以自己撤销，撤销后立即失去访问权限。被驳回的资源显示「重新申请」，提交后回到待审批。
 
 同一资源重复申请不会产生多条记录；被驳回后可以重新申请，状态回到待审批。
 
@@ -36,6 +36,6 @@
 | GET | `/api/subscriptions/pending/count` | 超级管理员 | 待审批数量 |
 | POST | `/api/subscriptions/{id}/approve` | 超级管理员 | 批准 |
 | POST | `/api/subscriptions/{id}/reject` | 超级管理员 | 驳回 |
-| DELETE | `/api/subscriptions/{id}` | 超级管理员 | 撤销已批准的订阅 |
+| DELETE | `/api/subscriptions/{id}` | 登录 | 撤销订阅（申请人本人或超级管理员） |
 
 `resource_type` 取 `mcp`、`agent`、`skill`。

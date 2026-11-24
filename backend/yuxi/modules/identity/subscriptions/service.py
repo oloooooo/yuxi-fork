@@ -14,6 +14,7 @@ from yuxi.modules.extensions.skills.models import Skill
 from yuxi.modules.extensions.skills.repository import SkillRepository
 from yuxi.modules.identity.models import User
 from yuxi.modules.identity.permissions import (
+    ADMIN_ROLES,
     ResourcePermission,
     resolve_agent_permission,
     resolve_mcp_permission,
@@ -46,13 +47,15 @@ async def _resource_row(db: AsyncSession, resource_type: str, slug: str) -> Agen
     raise SubscriptionError(f"未知资源类型：{resource_type}")
 
 
-def _current_permission(user: User, row: Agent | Skill | MCPServer) -> ResourcePermission:
-    """不看订阅授权，只判断当前的共享范围是否已经放行。"""
+def _current_permission(
+    user: User, row: Agent | Skill | MCPServer, *, granted: bool = False
+) -> ResourcePermission:
+    """判断当前用户对资源的使用权限；granted 表示已有批准的订阅。"""
     if isinstance(row, Agent):
-        return resolve_agent_permission(user, row)
+        return resolve_agent_permission(user, row, granted=granted)
     if isinstance(row, Skill):
-        return resolve_skill_permission(user, row)
-    return resolve_mcp_permission(user, row)
+        return resolve_skill_permission(user, row, granted=granted)
+    return resolve_mcp_permission(user, row, granted=granted)
 
 
 def serialize(row: ResourceSubscription) -> dict[str, Any]:
@@ -85,13 +88,14 @@ async def list_catalog(db: AsyncSession, user: User) -> list[dict[str, Any]]:
         if resource_type == "agent" and row.visibility == "private":
             continue
         subscription = mine.get(row.slug)
+        granted = subscription is not None and subscription.status == "approved"
         catalog.append(
             {
                 "resource_type": resource_type,
                 "resource_slug": row.slug,
                 "name": row.name,
                 "description": getattr(row, "description", None) or "",
-                "visible": _current_permission(user, row) != ResourcePermission.NONE,
+                "visible": _current_permission(user, row, granted=granted) != ResourcePermission.NONE,
                 "status": subscription.status if subscription else None,
                 "subscription_id": subscription.id if subscription else None,
             }
@@ -196,12 +200,14 @@ async def decide(db: AsyncSession, subscription_id: int, operator: User, *, appr
     return serialize(item)
 
 
-async def revoke(db: AsyncSession, subscription_id: int) -> None:
-    """撤销已批准的订阅，用户下一次请求即失去读取权限。"""
+async def revoke(db: AsyncSession, subscription_id: int, *, operator: User) -> None:
+    """撤销订阅，用户下一次请求即失去读取权限；申请人只能撤销自己的记录。"""
     repo = SubscriptionRepository(db)
     item = await repo.get(subscription_id)
     if item is None:
         raise SubscriptionError("申请不存在", status_code=404)
+    if operator.role not in ADMIN_ROLES and item.user_id != operator.id:
+        raise SubscriptionError("无权撤销他人的申请", status_code=403)
     await repo.delete(item)
     await db.commit()
 

@@ -80,6 +80,7 @@ async def _submit(test_client, headers, resource_type: str, slug: str) -> dict:
 async def test_connector_subscription_becomes_visible_after_approval(test_client, admin_headers):
     """连接器申请由超管批准后进入可见列表，撤销后再次消失。"""
     user = await _create_user(test_client, admin_headers)
+    other = await _create_user(test_client, admin_headers)
     slug = f"it-sub-mcp-{uuid.uuid4().hex[:8]}"
     try:
         await _create_connector(test_client, admin_headers, slug, {"access_level": "user", "user_uids": [uuid.uuid4().hex]})
@@ -100,12 +101,15 @@ async def test_connector_subscription_becomes_visible_after_approval(test_client
         assert approved.json()["data"]["status"] == "approved"
         assert slug in await _visible_mcp_slugs(test_client, user["headers"])
 
-        revoked = await test_client.delete(f"/api/subscriptions/{created['id']}", headers=admin_headers)
+        denied = await test_client.delete(f"/api/subscriptions/{created['id']}", headers=other["headers"])
+        assert denied.status_code == 403, denied.text
+        revoked = await test_client.delete(f"/api/subscriptions/{created['id']}", headers=user["headers"])
         assert revoked.status_code == 200, revoked.text
         assert slug not in await _visible_mcp_slugs(test_client, user["headers"])
     finally:
         await test_client.delete(f"/api/system/mcp-servers/{slug}", headers=admin_headers)
         await delete_user_by_id(test_client, admin_headers, user["user"]["id"])
+        await delete_user_by_id(test_client, admin_headers, other["user"]["id"])
 
 
 async def test_rejected_subscription_can_be_resubmitted(test_client, admin_headers):

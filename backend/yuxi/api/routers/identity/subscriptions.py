@@ -103,12 +103,12 @@ async def reject_route(
 @router.delete("/{subscription_id}")
 async def revoke_route(
     subscription_id: int,
-    current_user: User = Depends(get_superadmin_user),
+    current_user: User = Depends(get_required_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """撤销已批准的订阅。"""
+    """撤销订阅：申请人可撤销自己的，超级管理员可撤销任意一条。"""
     try:
-        await service.revoke(db, subscription_id)
+        await service.revoke(db, subscription_id, operator=current_user)
     except SubscriptionError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
     return {"success": True}
