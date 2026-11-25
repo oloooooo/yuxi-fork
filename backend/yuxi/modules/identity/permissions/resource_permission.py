@@ -98,6 +98,22 @@ def _normalize_scope(scope: dict | None) -> dict | None:
     return {"access_level": access_level, "department_ids": [], "user_uids": user_uids}
 
 
+def _extend_read_with_manage(read_scope: dict | None, manage_scope: dict | None) -> dict | None:
+    """把同级别的管理范围并入读取范围：能管理某部门/某人，必然能读取它。"""
+
+    if not read_scope or not manage_scope:
+        return read_scope
+    if read_scope["access_level"] == "global":
+        return read_scope
+    if read_scope["access_level"] != manage_scope["access_level"]:
+        return read_scope
+    return {
+        "access_level": read_scope["access_level"],
+        "department_ids": sorted(set(read_scope["department_ids"]) | set(manage_scope["department_ids"])),
+        "user_uids": sorted(set(read_scope["user_uids"]) | set(manage_scope["user_uids"])),
+    }
+
+
 def _validate_manage_scope(read_scope: dict | None, manage_scope: dict | None) -> None:
     """确保管理范围不会超出读取范围。"""
 
@@ -134,6 +150,7 @@ def normalize_permission_config(
     if config.get("version") == 2:
         read_scope = _normalize_scope(config.get("read_scope"))
         manage_scope = _normalize_scope(config.get("manage_scope"))
+        read_scope = _extend_read_with_manage(read_scope, manage_scope)
         try:
             _validate_manage_scope(read_scope, manage_scope)
         except ValueError:

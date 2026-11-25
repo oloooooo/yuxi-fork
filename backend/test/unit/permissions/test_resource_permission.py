@@ -5,6 +5,7 @@ import pytest
 from yuxi.modules.identity.permissions import (
     ResourcePermission,
     ResourcePermissionDenied,
+    normalize_permission_config,
     require_knowledge_base_permission,
     resolve_agent_permission,
     resolve_knowledge_base_permission,
@@ -288,3 +289,20 @@ def test_department_admin_keeps_manage_after_switching_to_user_scope():
     other_admin = _user(uid="other-admin", role="admin", department_id=8)
     assert resolve_agent_permission(admin, resource) == ResourcePermission.MANAGE
     assert resolve_agent_permission(other_admin, resource) == ResourcePermission.NONE
+
+
+def test_manage_scope_extends_read_scope():
+    """管理范围并入读取范围：把部门 2 设为管理范围后，读取范围自动包含部门 2。"""
+    config = normalize_permission_config(
+        {
+            "version": 2,
+            "read_scope": {"access_level": "department", "department_ids": [1], "user_uids": []},
+            "manage_scope": {"access_level": "department", "department_ids": [2], "user_uids": []},
+        },
+        strict=True,
+    )
+    assert config["read_scope"]["department_ids"] == [1, 2]
+    assert config["manage_scope"]["department_ids"] == [2]
+    travel_admin = _user("travel_admin", "admin", 2)
+    resource = SimpleNamespace(created_by="someone", share_config=config)
+    assert resolve_agent_permission(travel_admin, resource) == ResourcePermission.MANAGE
