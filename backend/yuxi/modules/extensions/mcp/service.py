@@ -209,7 +209,19 @@ async def get_enabled_mcp_servers(
     if user is None:
         return servers
     granted = await _granted_mcp_slugs(db, user)
-    return [server for server in servers if mcp_server_visible(user, server, granted=server.slug in granted)]
+    disabled = await _disabled_mcp_slugs(db, user)
+    return [
+        server
+        for server in servers
+        if server.slug not in disabled and mcp_server_visible(user, server, granted=server.slug in granted)
+    ]
+
+
+async def _disabled_mcp_slugs(db, user) -> set[str]:
+    """当前用户主动停止使用的连接器；停用优先于共享范围与订阅。"""
+    from yuxi.modules.identity.subscriptions.service import disabled_slugs
+
+    return await disabled_slugs(db, user_id=getattr(user, "id", None), resource_type="mcp")
 
 
 async def get_mcp_tools(
@@ -635,10 +647,12 @@ async def available_mcp_servers(db: AsyncSession, server_slugs, *, user_id: int)
     user = await active_mcp_user(db, user_id=user_id)
     rows = await runtime_mcp_servers(db, server_slugs, user_id)
     granted = await _granted_mcp_slugs(db, user)
+    disabled = await _disabled_mcp_slugs(db, user)
     available = {
         server.slug: server
         for server, connection in rows
-        if mcp_server_visible(user, server, granted=server.slug in granted)
+        if server.slug not in disabled
+        and mcp_server_visible(user, server, granted=server.slug in granted)
         and builtin_mcp_available(server.slug)
         and connection_status(server, connection) in {"connected", "not_required"}
     }

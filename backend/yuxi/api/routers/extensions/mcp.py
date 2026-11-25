@@ -29,7 +29,7 @@ from yuxi.modules.extensions.mcp.service import (
 )
 from yuxi.modules.identity.models import User
 from yuxi.modules.identity.permissions import ADMIN_ROLES, ResourcePermission, resolve_mcp_permission
-from yuxi.modules.identity.subscriptions.service import approved_slugs
+from yuxi.modules.identity.subscriptions.service import approved_slugs, disabled_slugs
 from yuxi.shared.errors import DomainError
 
 mcp = APIRouter(prefix="/system/mcp-servers", tags=["mcp"])
@@ -108,8 +108,11 @@ async def get_mcp_servers(
             }
 
         granted = await approved_slugs(db, user_id=current_user.id, resource_type="mcp")
+        disabled = await disabled_slugs(db, user_id=current_user.id, resource_type="mcp")
         data = []
         for server in servers:
+            if server.slug in disabled:
+                continue
             if resolve_mcp_permission(current_user, server, granted=server.slug in granted) == ResourcePermission.NONE:
                 continue
             if not server.enabled and states[server.slug] not in {"connected", "reconnect_required"}:

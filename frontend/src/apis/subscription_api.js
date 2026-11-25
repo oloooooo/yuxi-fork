@@ -30,3 +30,11 @@ export const rejectSubscription = async id => apiPost(`${BASE_URL}/${id}/reject`
 
 /** 撤销已批准的订阅 */
 export const revokeSubscription = async id => apiDelete(`${BASE_URL}/${id}`)
+
+/** 个人停止使用资源：只影响自己，不改共享范围 */
+export const stopUsingSubscription = async (resourceType, resourceSlug) =>
+  apiPost(`${BASE_URL}/stop`, { resource_type: resourceType, resource_slug: resourceSlug })
+
+/** 恢复使用自己停用过的资源 */
+export const resumeUsingSubscription = async (resourceType, resourceSlug) =>
+  apiPost(`${BASE_URL}/resume`, { resource_type: resourceType, resource_slug: resourceSlug })

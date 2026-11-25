@@ -23,7 +23,32 @@
                 </template>
                 <p class="marketplace-desc">{{ item.description || '暂无描述' }}</p>
                 <a-button
-                  v-if="item.status !== 'pending'"
+                  v-if="item.status === 'disabled'"
+                  size="small"
+                  :loading="acting === `resume:${item.resource_slug}`"
+                  @click="resume(item)"
+                >
+                  恢复使用
+                </a-button>
+                <a-button
+                  v-else-if="item.visible"
+                  size="small"
+                  danger
+                  :loading="acting === `stop:${item.resource_slug}`"
+                  @click="stop(item)"
+                >
+                  停止使用
+                </a-button>
+                <a-button
+                  v-else-if="item.status === 'pending'"
+                  size="small"
+                  :loading="withdrawing === item.subscription_id"
+                  @click="withdraw(item.subscription_id)"
+                >
+                  撤回申请
+                </a-button>
+                <a-button
+                  v-else
                   type="primary"
                   size="small"
                   :loading="submitting === item.resource_slug"
@@ -31,7 +56,6 @@
                 >
                   {{ item.status === 'rejected' ? '重新申请' : '申请订阅' }}
                 </a-button>
-                <span v-else class="marketplace-hint">等待管理员审批，可在「我的申请」撤回</span>
               </a-card>
             </a-list-item>
           </template>
@@ -47,10 +71,19 @@
             </template>
             <template v-else-if="column.key === 'actions'">
               <a-button
+                v-if="record.status === 'disabled'"
+                size="small"
+                :loading="acting === `resume:${record.resource_slug}`"
+                @click="resume(record)"
+              >
+                恢复使用
+              </a-button>
+              <a-button
+                v-else
                 size="small"
                 danger
                 :loading="withdrawing === record.id"
-                @click="withdraw(record)"
+                @click="withdraw(record.id)"
               >
                 撤回
               </a-button>
@@ -91,7 +124,9 @@ import {
   listPendingSubscriptions,
   listSubscriptionCatalog,
   rejectSubscription,
+  resumeUsingSubscription,
   revokeSubscription,
+  stopUsingSubscription,
   submitSubscription
 } from '@/apis/subscription_api'
 import { useUserStore } from '@/modules/identity/model/user'
@@ -122,6 +157,7 @@ const pendingColumns = [
 
 const loading = ref(false)
 const submitting = ref('')
+const acting = ref('')
 const withdrawing = ref(0)
 const deciding = ref(0)
 const activeTab = ref('agent')
@@ -132,7 +168,7 @@ const pending = ref([])
 const grouped = computed(() => {
   const map = { agent: [], skill: [], mcp: [] }
   for (const item of catalog.value) {
-    if (!map[item.resource_type] || item.visible) continue
+    if (!map[item.resource_type]) continue
     map[item.resource_type].push(item)
   }
   return map
@@ -144,10 +180,10 @@ const typeLabel = (type) =>
   ({ agent: '智能体', skill: 'Skill', mcp: '连接器', knowledge_create: '知识库权限' })[type] || type
 
 const statusText = (status) =>
-  ({ pending: '待审批', approved: '已批准', rejected: '已驳回' })[status] || '未申请'
+  ({ pending: '待审批', approved: '已可用', rejected: '已驳回', disabled: '已停止使用' })[status] || '未申请'
 
 const statusColor = (status) =>
-  ({ pending: 'orange', approved: 'green', rejected: 'red' })[status] || 'default'
+  ({ pending: 'orange', approved: 'green', rejected: 'red', disabled: 'default' })[status] || 'default'
 
 const loadAll = async () => {
   loading.value = true
@@ -184,10 +220,38 @@ const apply = async (item) => {
   }
 }
 
-const withdraw = async (record) => {
-  withdrawing.value = record.id
+const stop = async (item) => {
+  acting.value = `stop:${item.resource_slug}`
   try {
-    await revokeSubscription(record.id)
+    await stopUsingSubscription(item.resource_type, item.resource_slug)
+    message.success('已停止使用，可在资源市场恢复')
+    await loadAll()
+  } catch (error) {
+    message.warning(error?.message || '停止使用失败')
+    await loadAll()
+  } finally {
+    acting.value = ''
+  }
+}
+
+const resume = async (item) => {
+  acting.value = `resume:${item.resource_slug}`
+  try {
+    await resumeUsingSubscription(item.resource_type, item.resource_slug)
+    message.success('已恢复使用')
+    await loadAll()
+  } catch (error) {
+    message.warning(error?.message || '恢复使用失败')
+    await loadAll()
+  } finally {
+    acting.value = ''
+  }
+}
+
+const withdraw = async (subscriptionId) => {
+  withdrawing.value = subscriptionId
+  try {
+    await revokeSubscription(subscriptionId)
     message.success('已撤回申请')
     await loadAll()
   } catch (error) {

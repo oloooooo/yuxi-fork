@@ -276,3 +276,39 @@ async def test_pending_request_auto_approves_after_scope_expands(test_client, ad
     finally:
         await test_client.delete(f"/api/system/mcp-servers/{slug}", headers=admin_headers)
         await test_client.delete(f"/api/auth/users/{applicant['user']['id']}", headers=admin_headers)
+
+
+async def test_user_stops_and_resumes_shared_resource(test_client, admin_headers):
+    """个人停止使用只影响自己：资源从列表消失，恢复后重新可见。"""
+    applicant = await _create_user(test_client, admin_headers)
+    slug = f"it-sub-stop-{uuid.uuid4().hex[:6]}"
+    await _create_connector(
+        test_client, admin_headers, slug, {"access_level": "user", "user_uids": [applicant["user"]["uid"]]}
+    )
+    try:
+        visible = await _visible_mcp_slugs(test_client, applicant["headers"])
+        assert slug in visible
+
+        stop = await test_client.post(
+            "/api/subscriptions/stop",
+            headers=applicant["headers"],
+            json={"resource_type": "mcp", "resource_slug": slug},
+        )
+        assert stop.status_code == 200, stop.text
+        assert slug not in await _visible_mcp_slugs(test_client, applicant["headers"])
+
+        catalog = await test_client.get("/api/subscriptions/catalog", headers=applicant["headers"])
+        row = next(item for item in catalog.json()["data"] if item["resource_slug"] == slug)
+        assert row["status"] == "disabled"
+        assert row["visible"] is False
+
+        resume = await test_client.post(
+            "/api/subscriptions/resume",
+            headers=applicant["headers"],
+            json={"resource_type": "mcp", "resource_slug": slug},
+        )
+        assert resume.status_code == 200, resume.text
+        assert slug in await _visible_mcp_slugs(test_client, applicant["headers"])
+    finally:
+        await test_client.delete(f"/api/system/mcp-servers/{slug}", headers=admin_headers)
+        await test_client.delete(f"/api/auth/users/{applicant['user']['id']}", headers=admin_headers)

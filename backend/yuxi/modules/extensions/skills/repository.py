@@ -17,7 +17,7 @@ class SkillRepository:
     async def _granted_slugs(self, user: User) -> set[str]:
         """已获批的 Skill 订阅，用于补足共享范围拒绝的只读访问。"""
         user_id = getattr(user, "id", None)
-        if user_id is None:
+        if user_id is None or getattr(self, "db", None) is None:
             return set()
         cache = self.db.info.setdefault("approved_subscription_slugs", {})
         key = (user_id, "skill")
@@ -27,30 +27,47 @@ class SkillRepository:
             cache[key] = await SubscriptionRepository(self.db).approved_slugs(user_id=user_id, resource_type="skill")
         return cache[key]
 
+    async def _disabled_slugs(self, user: User) -> set[str]:
+        """当前用户主动停止使用的 Skill；停用优先于共享范围与订阅。"""
+        db = getattr(self, "db", None)
+        user_id = getattr(user, "id", None)
+        if db is None or user_id is None:
+            return set()
+        from yuxi.modules.identity.subscriptions.service import disabled_slugs
+
+        return await disabled_slugs(db, user_id=user_id, resource_type="skill")
+
     async def list_enabled_readable(self, user: User) -> list[Skill]:
         """只返回当前用户可使用的已启用共享索引。"""
         granted = await self._granted_slugs(user)
+        disabled = await self._disabled_slugs(user)
         return [
             item
             for item in await self.list_enabled()
-            if resolve_skill_permission(user, item, granted=item.slug in granted) != ResourcePermission.NONE
+            if item.slug not in disabled
+            and resolve_skill_permission(user, item, granted=item.slug in granted) != ResourcePermission.NONE
         ]
 
     async def list_authorized_for_projection(self, user: User) -> list[Skill]:
         """为投影锁定阶段包含当前用户可读的停用项。"""
         granted = await self._granted_slugs(user)
+        disabled = await self._disabled_slugs(user)
         return [
             item
             for item in await self.list_all(include_agent_bound=True)
-            if resolve_skill_permission(user, item, granted=item.slug in granted) != ResourcePermission.NONE
+            if item.slug not in disabled
+            and resolve_skill_permission(user, item, granted=item.slug in granted) != ResourcePermission.NONE
         ]
 
     async def list_visible_for_management(self, user: User) -> list[Skill]:
         """返回可管理项和可读取的已启用项。"""
         visible = []
         granted = await self._granted_slugs(user)
+        disabled = await self._disabled_slugs(user)
         for item in await self.list_all():
             permission = resolve_skill_permission(user, item, granted=item.slug in granted)
+            if item.slug in disabled and permission != ResourcePermission.MANAGE:
+                continue
             if permission == ResourcePermission.MANAGE or (item.enabled and permission != ResourcePermission.NONE):
                 visible.append(item)
         return visible

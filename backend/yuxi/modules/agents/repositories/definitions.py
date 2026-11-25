@@ -112,7 +112,7 @@ class AgentRepository:
     async def _granted_slugs(self, user: User) -> set[str]:
         """已获批的智能体订阅，用于补足共享范围拒绝的只读访问。"""
         user_id = getattr(user, "id", None)
-        if user_id is None:
+        if user_id is None or getattr(self, "db", None) is None:
             return set()
         cache = self.db.info.setdefault("approved_subscription_slugs", {})
         key = (user_id, "agent")
@@ -121,6 +121,16 @@ class AgentRepository:
 
             cache[key] = await SubscriptionRepository(self.db).approved_slugs(user_id=user_id, resource_type="agent")
         return cache[key]
+
+    async def _disabled_slugs(self, user: User) -> set[str]:
+        """当前用户主动停止使用的智能体；停用优先于共享范围与订阅。"""
+        db = getattr(self, "db", None)
+        user_id = getattr(user, "id", None)
+        if db is None or user_id is None:
+            return set()
+        from yuxi.modules.identity.subscriptions.service import disabled_slugs
+
+        return await disabled_slugs(db, user_id=user_id, resource_type="agent")
 
     async def list_visible(self, *, user: User) -> list[Agent]:
         """列出当前用户可见的智能体配置，已获批订阅的共享智能体一并返回。"""
@@ -133,10 +143,12 @@ class AgentRepository:
         if visibility_user.role == "superadmin":
             return agents
         granted = await self._granted_slugs(user)
+        disabled = await self._disabled_slugs(user)
         return [
             agent
             for agent in agents
-            if (getattr(user, "user_kind", "human") != "end_user" or agent.visibility == "shared")
+            if agent.slug not in disabled
+            and (getattr(user, "user_kind", "human") != "end_user" or agent.visibility == "shared")
             and user_can_access_agent(visibility_user, agent, granted=agent.slug in granted)
         ]
 
@@ -164,6 +176,8 @@ class AgentRepository:
         if not agent:
             return None
         if getattr(user, "user_kind", "human") == "end_user" and agent.visibility != "shared":
+            return None
+        if agent.slug in await self._disabled_slugs(user):
             return None
         granted = agent.visibility != "private" and agent.slug in await self._granted_slugs(user)
         if for_run and agent.visibility == "private" and not user_can_run_agent(user, agent):

@@ -135,6 +135,7 @@ async def list_catalog(db: AsyncSession, user: User) -> list[dict[str, Any]]:
         if resource_type == "agent" and row.visibility == "private":
             continue
         subscription = mine.get(row.slug)
+        disabled = subscription is not None and subscription.status == "disabled"
         granted = subscription is not None and subscription.status == "approved"
         catalog.append(
             {
@@ -142,7 +143,8 @@ async def list_catalog(db: AsyncSession, user: User) -> list[dict[str, Any]]:
                 "resource_slug": row.slug,
                 "name": row.name,
                 "description": getattr(row, "description", None) or "",
-                "visible": _current_permission(user, row, granted=granted) != ResourcePermission.NONE,
+                "visible": (not disabled)
+                and _current_permission(user, row, granted=granted) != ResourcePermission.NONE,
                 "status": subscription.status if subscription else None,
                 "subscription_id": subscription.id if subscription else None,
             }
@@ -162,11 +164,18 @@ async def submit_request(db: AsyncSession, user: User, resource_type: str, slug:
         raise SubscriptionError("资源不存在", status_code=404)
     if resource_type == "agent" and row.visibility == "private":
         raise SubscriptionError("私有智能体不支持订阅")
-    if _current_permission(user, row) != ResourcePermission.NONE:
-        raise SubscriptionError("你已拥有该资源的使用权限")
 
     repo = SubscriptionRepository(db)
     existing = await repo.find(resource_type=resource_type, resource_slug=slug, user_id=user.id)
+    if existing is not None and existing.status == "disabled":
+        existing.status = "approved"
+        existing.decided_at = utc_now()
+        existing.decided_by = user.uid
+        await db.commit()
+        await db.refresh(existing)
+        return existing
+    if _current_permission(user, row) != ResourcePermission.NONE:
+        raise SubscriptionError("你已拥有该资源的使用权限")
     if existing is not None:
         if existing.status == "pending":
             return existing
@@ -189,6 +198,57 @@ async def submit_request(db: AsyncSession, user: User, resource_type: str, slug:
     await db.commit()
     await db.refresh(item)
     return item
+
+
+async def stop_using(db: AsyncSession, user: User, resource_type: str, slug: str) -> ResourceSubscription:
+    """个人停止使用：只影响自己的可见性，不改共享范围。"""
+    if resource_type not in RESOURCE_TYPES:
+        raise SubscriptionError(f"资源 {resource_type} 不支持停止使用")
+    row = await _resource_row(db, resource_type, slug)
+    if row is None:
+        raise SubscriptionError("资源不存在", status_code=404)
+    if _current_permission(user, row) == ResourcePermission.NONE:
+        raise SubscriptionError("当前没有该资源的使用权限")
+
+    repo = SubscriptionRepository(db)
+    item = await repo.find(resource_type=resource_type, resource_slug=slug, user_id=user.id)
+    if item is None:
+        item = ResourceSubscription(resource_type=resource_type, resource_slug=slug, user_id=user.id)
+    item.status = "disabled"
+    item.decided_at = utc_now()
+    item.decided_by = user.uid
+    item = await repo.save(item)
+    await db.commit()
+    await db.refresh(item)
+    return item
+
+
+async def resume_using(db: AsyncSession, user: User, resource_type: str, slug: str) -> ResourceSubscription:
+    """恢复使用：仅恢复自己停用过的资源。"""
+    repo = SubscriptionRepository(db)
+    item = await repo.find(resource_type=resource_type, resource_slug=slug, user_id=user.id)
+    if item is None or item.status != "disabled":
+        raise SubscriptionError("当前没有停用记录", status_code=404)
+    item.status = "approved"
+    item.decided_at = utc_now()
+    item.decided_by = user.uid
+    await db.commit()
+    await db.refresh(item)
+    return item
+
+
+async def disabled_slugs(db: AsyncSession, *, user_id: int | None, resource_type: str) -> set[str]:
+    """当前用户主动停止使用的资源标识。"""
+    if user_id is None:
+        return set()
+    result = await db.execute(
+        select(ResourceSubscription.resource_slug).where(
+            ResourceSubscription.user_id == user_id,
+            ResourceSubscription.resource_type == resource_type,
+            ResourceSubscription.status == "disabled",
+        )
+    )
+    return set(result.scalars().all())
 
 
 async def _submit_knowledge_create(db: AsyncSession, user: User) -> ResourceSubscription:

@@ -53,6 +53,34 @@ async def submit_request_route(
     return {"success": True, "data": service.serialize(item)}
 
 
+@router.post("/stop")
+async def stop_using_route(
+    payload: SubscriptionRequest,
+    current_user: User = Depends(get_required_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """个人停止使用资源：只影响自己，不改共享范围。"""
+    try:
+        item = await service.stop_using(db, current_user, payload.resource_type, payload.resource_slug)
+    except SubscriptionError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+    return {"success": True, "data": service.serialize(item)}
+
+
+@router.post("/resume")
+async def resume_using_route(
+    payload: SubscriptionRequest,
+    current_user: User = Depends(get_required_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """恢复使用自己停用过的资源。"""
+    try:
+        item = await service.resume_using(db, current_user, payload.resource_type, payload.resource_slug)
+    except SubscriptionError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+    return {"success": True, "data": service.serialize(item)}
+
+
 @router.get("/pending")
 async def list_pending_route(
     current_user: User = Depends(get_admin_user),
