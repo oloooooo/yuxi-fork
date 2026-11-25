@@ -11,7 +11,7 @@ from yuxi.api.dependencies.auth import get_admin_user
 from yuxi.api.dependencies.knowledge import (
     ensure_knowledge_base_permission,
     require_knowledge_base_manage,
-    require_knowledge_base_read,
+    require_knowledge_base_admin_read,
 )
 from yuxi.infrastructure.observability.logging import logger
 from yuxi.modules.identity.models import User
@@ -101,7 +101,7 @@ async def upload_evaluation_dataset(
 @evaluation.get("/knowledge-bases/{kb_id}/datasets")
 async def list_evaluation_datasets(
     kb_id: str,
-    current_user: User = Depends(require_knowledge_base_read),
+    current_user: User = Depends(require_knowledge_base_admin_read),
 ):
     """获取知识库的评估数据集列表"""
     try:
@@ -121,7 +121,7 @@ async def get_evaluation_dataset(
     dataset_id: str,
     page: int = 1,
     page_size: int = 10,
-    current_user: User = Depends(require_knowledge_base_read),
+    current_user: User = Depends(require_knowledge_base_admin_read),
 ):
     """获取评估数据集详情"""
     try:
@@ -262,7 +262,7 @@ async def run_evaluation(
 @evaluation.get("/knowledge-bases/{kb_id}/runs")
 async def list_evaluation_runs(
     kb_id: str,
-    current_user: User = Depends(require_knowledge_base_read),
+    current_user: User = Depends(require_knowledge_base_admin_read),
 ):
     """获取知识库评估运行历史"""
     try:
@@ -283,7 +283,7 @@ async def get_evaluation_run_results(
     page: int = 1,
     page_size: int = 20,
     result_filter: str | None = None,
-    current_user: User = Depends(require_knowledge_base_read),
+    current_user: User = Depends(require_knowledge_base_admin_read),
 ):
     """获取评估运行结果"""
     try:

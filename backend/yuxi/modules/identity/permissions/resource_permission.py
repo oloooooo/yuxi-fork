@@ -251,8 +251,20 @@ def require_resource_permission(
 
 
 def resolve_knowledge_base_permission(user: Any, resource: ShareableResource) -> ResourcePermission:
-    """解析知识库权限，普通用户最多只能获得只读权限。"""
+    """解析知识库权限；创建者管理自己的知识库，其余按共享范围与角色上限。"""
 
+    try:
+        normalize_permission_config(_value(resource, "share_config"))
+    except (TypeError, ValueError) as exc:
+        logger.warning(
+            "Invalid knowledge base share config; denying access: resource_id={}, user_uid={}, error={}",
+            _value(resource, "id", _value(resource, "kb_id", "unknown")),
+            _value(user, "uid", "unknown"),
+            str(exc),
+        )
+        return ResourcePermission.NONE
+    if _value(user, "uid") and str(_value(resource, "created_by", "") or "") == str(_value(user, "uid")):
+        return ResourcePermission.MANAGE
     return resolve_resource_permission(
         user,
         resource,

@@ -124,8 +124,8 @@ async def test_department_admin_governs_only_own_department_connectors(test_clie
 
 
 
-async def test_creator_admin_edits_non_sensitive_fields_and_resets_auth_only(test_client, admin_headers):
-    """创建者可改地址/超时/描述，认证只能整体重置；非创建者管理员不能改。"""
+async def test_department_admin_edits_non_sensitive_fields_and_resets_auth_only(test_client, admin_headers):
+    """本部门管理员可改地址/超时/描述，认证只能整体重置；别部门管理员不能改。"""
     suffix = uuid.uuid4().hex[:6]
     department, creator_headers = await _create_department_with_admin(
         test_client, admin_headers, f"it-edit-dept-{suffix}"
@@ -151,7 +151,42 @@ async def test_creator_admin_edits_non_sensitive_fields_and_resets_auth_only(tes
         },
     )
     assert created.status_code == 200, created.text
+    peer_suffix = uuid.uuid4().hex[:8]
+    peer_uid = f"dept_peer_{peer_suffix}"
+    peer_password = f"Pw!{peer_suffix}"
+    peer_created = await test_client.post(
+        "/api/auth/users",
+        headers=admin_headers,
+        json={
+            "username": peer_uid,
+            "password": peer_password,
+            "role": "admin",
+            "department_id": department_id,
+        },
+    )
+    assert peer_created.status_code == 200, peer_created.text
+    same_department_headers = await _login(test_client, peer_uid, peer_password)
     try:
+        peer_detail = await _read_connector(test_client, same_department_headers, slug)
+        assert peer_detail["can_edit_config"] is True, "同部门管理员应能编辑配置"
+        assert peer_detail["url"] == "https://example.com/mcp"
+        assert "headers" not in peer_detail
+
+        peer_update = await test_client.put(
+            f"/api/system/mcp-servers/{slug}",
+            headers=same_department_headers,
+            json={"description": "同部门管理员改过"},
+        )
+        assert peer_update.status_code == 200, peer_update.text
+        assert peer_update.json()["data"]["description"] == "同部门管理员改过"
+
+        peer_denied_headers = await test_client.put(
+            f"/api/system/mcp-servers/{slug}",
+            headers=same_department_headers,
+            json={"headers": {"Authorization": "Bearer leaked"}},
+        )
+        assert peer_denied_headers.status_code == 403, peer_denied_headers.text
+
         detail = await _read_connector(test_client, creator_headers, slug)
         assert detail["can_edit_config"] is True
         assert detail["url"] == "https://example.com/mcp"
@@ -196,5 +231,6 @@ async def test_creator_admin_edits_non_sensitive_fields_and_resets_auth_only(tes
         assert denied_peer.status_code in {403, 404}, denied_peer.text
     finally:
         await test_client.delete(f"/api/system/mcp-servers/{slug}", headers=admin_headers)
+        await test_client.delete(f"/api/auth/users/{peer_uid}", headers=admin_headers)
         await delete_department_by_id(test_client, admin_headers, department_id)
         await delete_department_by_id(test_client, admin_headers, other_department["id"])

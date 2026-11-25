@@ -101,9 +101,10 @@ def test_user_agent_and_skill_scope_is_read_only():
 
 
 def test_knowledge_base_owner_and_superadmin_can_manage():
+    """个人知识库由创建者管理，超管始终可管理。"""
     resource = _resource(created_by="owner", share_config={"version": 2})
 
-    assert resolve_knowledge_base_permission(_user(uid="owner"), resource) == ResourcePermission.NONE
+    assert resolve_knowledge_base_permission(_user(uid="owner"), resource) == ResourcePermission.MANAGE
     assert resolve_knowledge_base_permission(_user(uid="owner", role="admin"), resource) == ResourcePermission.MANAGE
     assert resolve_knowledge_base_permission(_user(role="superadmin"), resource) == ResourcePermission.MANAGE
 

@@ -385,6 +385,7 @@ import QuerySection from '@/modules/knowledge/ui/QuerySection.vue'
 import SearchConfigPanel from '@/modules/knowledge/ui/SearchConfigPanel.vue'
 import AiTextarea from '@/modules/agents/ui/AiTextarea.vue'
 import ShareConfigForm from '@/modules/agents/ui/ShareConfigForm.vue'
+import { useUserStore } from '@/modules/identity'
 import { departmentApi } from '@/apis/department_api'
 import { authApi } from '@/apis/auth_api'
 import { useChunkPresetOptions } from '@/modules/knowledge/model/useChunkPresetOptions'
@@ -739,6 +740,8 @@ const editModalTab = ref('basic')
 const editSaving = ref(false)
 const editFormRef = ref(null)
 const shareConfigFormRef = ref(null)
+const userStore = useUserStore()
+
 const emptyEditShareConfig = {
   version: 2,
   read_scope: { access_level: 'global', department_ids: [], user_uids: [] },
@@ -776,7 +779,7 @@ const fileList = computed(() => {
   return (store.documentFiles || []).map((f) => f.filename).filter(Boolean)
 })
 
-const canEditShareConfig = computed(() => canManageKnowledgeBase.value)
+const canEditShareConfig = computed(() => canManageKnowledgeBase.value && userStore.isAdmin)
 
 const shareConfigDisplay = computed(() => {
   const shareConfig = knowledgeBase.value?.share_config || {}

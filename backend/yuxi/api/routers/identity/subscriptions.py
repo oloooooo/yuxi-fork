@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from yuxi.api.dependencies.auth import get_db, get_required_user, get_superadmin_user
+from yuxi.api.dependencies.auth import get_admin_user, get_db, get_required_user
 from yuxi.modules.identity.models import User
 from yuxi.modules.identity.subscriptions import service
 from yuxi.modules.identity.subscriptions.service import SubscriptionError
@@ -17,7 +17,7 @@ class SubscriptionRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    resource_type: str = Field(pattern="^(mcp|agent|skill)$")
+    resource_type: str = Field(pattern="^(mcp|agent|skill|knowledge_create)$")
     resource_slug: str = Field(min_length=1, max_length=100)
 
 
@@ -55,27 +55,27 @@ async def submit_request_route(
 
 @router.get("/pending")
 async def list_pending_route(
-    current_user: User = Depends(get_superadmin_user),
+    current_user: User = Depends(get_admin_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """超管待审批队列与数量。"""
-    items = await service.list_pending(db)
+    """审批队列：超管看全部，部门管理员只看本部门范围的资源。"""
+    items = await service.list_pending(db, current_user)
     return {"success": True, "data": {"items": items, "count": len(items)}}
 
 
 @router.get("/pending/count")
 async def pending_count_route(
-    current_user: User = Depends(get_superadmin_user),
+    current_user: User = Depends(get_admin_user),
     db: AsyncSession = Depends(get_db),
 ):
     """导航角标使用的待审批数量。"""
-    return {"success": True, "data": {"count": await service.pending_count(db)}}
+    return {"success": True, "data": {"count": await service.pending_count(db, current_user)}}
 
 
 @router.post("/{subscription_id}/approve")
 async def approve_route(
     subscription_id: int,
-    current_user: User = Depends(get_superadmin_user),
+    current_user: User = Depends(get_admin_user),
     db: AsyncSession = Depends(get_db),
 ):
     """批准订阅。"""
@@ -89,7 +89,7 @@ async def approve_route(
 @router.post("/{subscription_id}/reject")
 async def reject_route(
     subscription_id: int,
-    current_user: User = Depends(get_superadmin_user),
+    current_user: User = Depends(get_admin_user),
     db: AsyncSession = Depends(get_db),
 ):
     """驳回订阅。"""

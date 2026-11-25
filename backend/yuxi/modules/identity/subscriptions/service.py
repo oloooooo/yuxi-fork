@@ -25,6 +25,9 @@ from yuxi.modules.identity.subscriptions.repository import SubscriptionRepositor
 from yuxi.shared.datetime import utc_now
 
 RESOURCE_TYPES = {"mcp": "连接器", "agent": "智能体", "skill": "Skill"}
+KNOWLEDGE_CREATE_TYPE = "knowledge_create"
+KNOWLEDGE_CREATE_SLUG = "*"
+KNOWLEDGE_CREATE_LABEL = "个人知识库创建权限"
 
 
 class SubscriptionError(ValueError):
@@ -45,6 +48,18 @@ async def _resource_row(db: AsyncSession, resource_type: str, slug: str) -> Agen
     if resource_type == "skill":
         return await SkillRepository(db).get_by_slug(slug)
     raise SubscriptionError(f"未知资源类型：{resource_type}")
+
+
+def _approver_can_handle(row: Agent | Skill | MCPServer | None, operator: User) -> bool:
+    """超管审批全部；部门范围的资源由对应部门管理员审批。"""
+    if operator.role == "superadmin":
+        return True
+    if operator.role != "admin" or row is None or not operator.department_id:
+        return False
+    read_scope = (row.share_config or {}).get("read_scope") or {}
+    if read_scope.get("access_level") != "department":
+        return False
+    return operator.department_id in (read_scope.get("department_ids") or [])
 
 
 def _current_permission(
@@ -84,6 +99,19 @@ async def list_catalog(db: AsyncSession, user: User) -> list[dict[str, Any]]:
         rows.append(("mcp", server))
 
     catalog = []
+    grant = mine.get(KNOWLEDGE_CREATE_SLUG)
+    if user.role not in ADMIN_ROLES:
+        catalog.append(
+            {
+                "resource_type": KNOWLEDGE_CREATE_TYPE,
+                "resource_slug": KNOWLEDGE_CREATE_SLUG,
+                "name": KNOWLEDGE_CREATE_LABEL,
+                "description": "批准后可以创建属于你个人的知识库",
+                "visible": grant is not None and grant.status == "approved",
+                "status": grant.status if grant else None,
+                "subscription_id": grant.id if grant else None,
+            }
+        )
     for resource_type, row in rows:
         if resource_type == "agent" and row.visibility == "private":
             continue
@@ -106,6 +134,10 @@ async def list_catalog(db: AsyncSession, user: User) -> list[dict[str, Any]]:
 
 async def submit_request(db: AsyncSession, user: User, resource_type: str, slug: str) -> ResourceSubscription:
     """登记订阅申请；已可见或重复申请时给出稳定结果。"""
+    if resource_type == KNOWLEDGE_CREATE_TYPE:
+        if user.role in ADMIN_ROLES:
+            raise SubscriptionError("管理员无需申请知识库创建权限")
+        return await _submit_knowledge_create(db, user)
     row = await _resource_row(db, resource_type, slug)
     if row is None:
         raise SubscriptionError("资源不存在", status_code=404)
@@ -140,20 +172,58 @@ async def submit_request(db: AsyncSession, user: User, resource_type: str, slug:
     return item
 
 
+async def _submit_knowledge_create(db: AsyncSession, user: User) -> ResourceSubscription:
+    """建库权限申请一人一条，驳回后可重新申请。"""
+    repo = SubscriptionRepository(db)
+    existing = await repo.find(
+        resource_type=KNOWLEDGE_CREATE_TYPE, resource_slug=KNOWLEDGE_CREATE_SLUG, user_id=user.id
+    )
+    if existing is not None:
+        if existing.status == "approved":
+            return existing
+        existing.status = "pending"
+        existing.decided_at = None
+        existing.decided_by = None
+        await db.commit()
+        await db.refresh(existing)
+        return existing
+    item = ResourceSubscription(
+        resource_type=KNOWLEDGE_CREATE_TYPE,
+        resource_slug=KNOWLEDGE_CREATE_SLUG,
+        user_id=user.id,
+        status="pending",
+    )
+    item = await repo.save(item)
+    await db.commit()
+    await db.refresh(item)
+    return item
+
+
+async def has_knowledge_create_grant(db: AsyncSession, user: User) -> bool:
+    """个人建库权限是否已获批。"""
+    item = await SubscriptionRepository(db).find(
+        resource_type=KNOWLEDGE_CREATE_TYPE, resource_slug=KNOWLEDGE_CREATE_SLUG, user_id=user.id
+    )
+    return item is not None and item.status == "approved"
+
+
 async def list_mine(db: AsyncSession, user: User) -> list[dict[str, Any]]:
     """当前用户的申请记录，附带资源展示名。"""
     items = await SubscriptionRepository(db).list_mine(user.id)
     result = []
     for item in items:
-        row = await _resource_row(db, item.resource_type, item.resource_slug)
         data = serialize(item)
-        data["name"] = row.name if row is not None else item.resource_slug
+        if item.resource_type == KNOWLEDGE_CREATE_TYPE:
+            data["name"] = KNOWLEDGE_CREATE_LABEL
+        else:
+            row = await _resource_row(db, item.resource_type, item.resource_slug)
+            data["name"] = row.name if row is not None else item.resource_slug
         result.append(data)
     return result
 
 
-async def list_pending(db: AsyncSession) -> list[dict[str, Any]]:
-    """超管待审批列表，附带申请人信息。"""
+async def list_pending(db: AsyncSession, operator: User) -> list[dict[str, Any]]:
+    """审批队列：超管看全部，部门管理员只看本部门范围的资源。"""
     items = await SubscriptionRepository(db).list_pending()
     user_ids = {item.user_id for item in items}
     users = {}
@@ -162,12 +232,20 @@ async def list_pending(db: AsyncSession) -> list[dict[str, Any]]:
         users = {user.id: user for user in rows}
     result = []
     for item in items:
-        row = await _resource_row(db, item.resource_type, item.resource_slug)
+        if item.resource_type == KNOWLEDGE_CREATE_TYPE:
+            name = KNOWLEDGE_CREATE_LABEL
+            handleable = operator.role == "superadmin"
+        else:
+            row = await _resource_row(db, item.resource_type, item.resource_slug)
+            name = row.name if row is not None else item.resource_slug
+            handleable = _approver_can_handle(row, operator)
+        if not handleable:
+            continue
         user = users.get(item.user_id)
         data = serialize(item)
         data.update(
             {
-                "name": row.name if row is not None else item.resource_slug,
+                "name": name,
                 "resource_missing": row is None,
                 "applicant_uid": user.uid if user else "",
                 "applicant_name": user.username if user else "",
@@ -177,9 +255,9 @@ async def list_pending(db: AsyncSession) -> list[dict[str, Any]]:
     return result
 
 
-async def pending_count(db: AsyncSession) -> int:
-    """导航角标使用的待审批数量。"""
-    return await SubscriptionRepository(db).pending_count()
+async def pending_count(db: AsyncSession, operator: User) -> int:
+    """导航角标使用的待审批数量，口径与列表一致。"""
+    return len(await list_pending(db, operator))
 
 
 async def decide(db: AsyncSession, subscription_id: int, operator: User, *, approve: bool) -> dict[str, Any]:
@@ -192,6 +270,13 @@ async def decide(db: AsyncSession, subscription_id: int, operator: User, *, appr
         raise SubscriptionError("该申请已处理", status_code=409)
     if item.user_id == operator.id:
         raise SubscriptionError("不能审批自己的申请", status_code=403)
+    if item.resource_type == KNOWLEDGE_CREATE_TYPE:
+        if operator.role != "superadmin":
+            raise SubscriptionError("只有超级管理员可以审批建库权限", status_code=403)
+    else:
+        row = await _resource_row(db, item.resource_type, item.resource_slug)
+        if not _approver_can_handle(row, operator):
+            raise SubscriptionError("只能审批本部门范围的申请", status_code=403)
     item.status = "approved" if approve else "rejected"
     item.decided_at = utc_now()
     item.decided_by = operator.uid

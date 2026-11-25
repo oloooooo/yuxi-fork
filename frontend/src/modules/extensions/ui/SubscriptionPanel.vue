@@ -60,7 +60,7 @@
         </a-table>
       </a-tab-pane>
 
-      <a-tab-pane v-if="userStore.isSuperAdmin" key="pending" tab="待审批">
+      <a-tab-pane v-if="userStore.isAdmin" key="pending" tab="待审批">
         <a-empty v-if="!pending.length" description="没有待处理申请" />
         <a-table
           v-else
@@ -108,7 +108,7 @@ const catalog = ref([])
 const mine = ref([])
 const pending = ref([])
 
-const typeLabels = { mcp: '连接器', agent: '智能体', skill: '技能' }
+const typeLabels = { mcp: '连接器', agent: '智能体', skill: '技能', knowledge_create: '知识库权限' }
 const statusLabels = { pending: '待审批', approved: '已批准', rejected: '已驳回' }
 const statusColors = { pending: 'gold', approved: 'green', rejected: 'red' }
 
@@ -135,7 +135,7 @@ async function loadAll() {
     const [catalogResult, mineResult] = await Promise.all([listSubscriptionCatalog(), listMySubscriptions()])
     catalog.value = catalogResult.data || []
     mine.value = mineResult.data || []
-    if (userStore.isSuperAdmin) {
+    if (userStore.isAdmin) {
       const pendingResult = await listPendingSubscriptions()
       pending.value = pendingResult.data?.items || []
       emit('pending-change', await getPendingSubscriptionCount())

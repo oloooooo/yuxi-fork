@@ -128,8 +128,7 @@ const router = createRouter({
               component: () => import('../../pages/KnowledgeBaseInfoView.vue'),
               meta: {
                 keepAlive: false,
-                requiresAuth: true,
-                requiresAdmin: true
+                requiresAuth: true
               }
             },
             {

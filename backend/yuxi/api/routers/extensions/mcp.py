@@ -214,19 +214,16 @@ async def update_mcp_server_route(
     current_user: User = Depends(get_required_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """更新 MCP 服务器配置；创建者可改地址/超时等非敏感字段，认证只能整体重置。"""
+    """更新 MCP 服务器配置；能管理该连接器者可改非敏感字段，认证只能整体重置。"""
     valid_transports = ("sse", "streamable_http")
     if request.transport is not None and request.transport not in valid_transports:
         raise HTTPException(status_code=400, detail=f"传输类型必须是 {', '.join(valid_transports)} 之一")
 
     server = await get_server_or_404(db, slug)
     is_superadmin = current_user.role == "superadmin"
-    can_edit_config = is_superadmin or (
-        server.created_by == current_user.uid
-        and resolve_mcp_permission(current_user, server) == ResourcePermission.MANAGE
-    )
+    can_edit_config = is_superadmin or resolve_mcp_permission(current_user, server) == ResourcePermission.MANAGE
     if not can_edit_config:
-        raise HTTPException(status_code=403, detail="只有创建者或超级管理员可以修改该连接器")
+        raise HTTPException(status_code=403, detail="只有可管理该连接器的人才能修改配置")
     if not is_superadmin:
         if request.transport is not None:
             raise HTTPException(status_code=403, detail="只有超级管理员可以修改传输方式")
@@ -475,19 +472,19 @@ async def get_server_or_404(db: AsyncSession, slug: str):
 
 
 def serialize_mcp_server(server, current_user: User) -> dict:
-    """序列化 MCP；创建者可见地址以便编辑，共享请求头始终只给超管。"""
+    """序列化 MCP；能管理配置者可见地址，共享请求头始终只给超管。"""
     data = server.to_dict()
     is_superadmin = current_user.role == "superadmin"
     permission = resolve_mcp_permission(current_user, server)
-    is_creator = not is_superadmin and server.created_by == current_user.uid and permission == ResourcePermission.MANAGE
+    can_edit_config = is_superadmin or permission == ResourcePermission.MANAGE
     if not is_superadmin:
         data.pop("headers", None)
-        if not is_creator:
+        if not can_edit_config:
             data.pop("url", None)
     if data.get("auth_mode") in STATIC_AUTH_MODES:
         data["config_revision"] = config_revision(server)
     data["can_manage"] = permission == ResourcePermission.MANAGE
-    data["can_edit_config"] = is_superadmin or is_creator
+    data["can_edit_config"] = can_edit_config
     data["is_builtin"] = is_builtin_mcp_server(server)
     data["allowed_access_levels"] = allowed_mcp_access_levels(current_user)
     return data

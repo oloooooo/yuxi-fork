@@ -6,10 +6,11 @@ import traceback
 from urllib.parse import quote
 
 from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, UploadFile
+from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, Field
 from starlette.responses import StreamingResponse
 
-from yuxi.api.dependencies.auth import get_admin_user, get_required_user
+from yuxi.api.dependencies.auth import get_admin_user, get_db, get_required_user
 from yuxi.api.dependencies.knowledge import (
     ensure_knowledge_base_permission,
     require_knowledge_base_manage,
@@ -22,7 +23,12 @@ from yuxi.infrastructure.minio.client import MinIOClient, StorageError, get_mini
 from yuxi.infrastructure.observability.logging import logger
 from yuxi.modules.background_jobs.service import job_tracker
 from yuxi.modules.identity.models import User
-from yuxi.modules.identity.permissions import ResourcePermission, resolve_knowledge_base_permission
+from yuxi.modules.identity.permissions import (
+    ADMIN_ROLES,
+    ResourcePermission,
+    resolve_knowledge_base_permission,
+)
+from yuxi.modules.identity.subscriptions.service import has_knowledge_create_grant
 from yuxi.modules.knowledge.base import KBNameConflictError, KBNotFoundError
 from yuxi.modules.knowledge.chunking.presets import get_chunk_preset_options, normalize_chunk_preset_id
 from yuxi.modules.knowledge.factory import KnowledgeBaseFactory
@@ -129,8 +135,8 @@ media_types = {
 
 
 @knowledge.get("/knowledge-bases")
-async def get_knowledge_bases(current_user: User = Depends(get_admin_user)):
-    """获取所有知识库（根据用户权限过滤）"""
+async def get_knowledge_bases(current_user: User = Depends(get_required_user)):
+    """获取当前用户可见的知识库"""
     try:
         return serialize_knowledge_base_list(await knowledge_base_manager.get_knowledge_bases_by_uid(current_user.uid))
     except HTTPException:
@@ -149,10 +155,20 @@ async def create_knowledge_base(
     additional_params: dict | None = Body(None),
     llm_model_spec: str | None = Body(None),
     share_config: dict | None = Body(None),
-    current_user: User = Depends(get_admin_user),
+    current_user: User = Depends(get_required_user),
+    db: AsyncSession = Depends(get_db),
 ):
-    """创建知识库"""
+    """创建知识库；普通用户需先获批建库权限，自己的知识库默认仅本人可见。"""
     logger.debug("Create knowledge_base")
+    is_manager = current_user.role in ADMIN_ROLES
+    if not is_manager and not await has_knowledge_create_grant(db, current_user):
+        raise HTTPException(status_code=403, detail="需要知识库创建权限，请先在扩展页申请")
+    if not is_manager:
+        share_config = {
+            "version": 2,
+            "read_scope": {"access_level": "user", "department_ids": [], "user_uids": [current_user.uid]},
+            "manage_scope": None,
+        }
     try:
         knowledge_base_info = await knowledge_base_manager.create_knowledge_base(
             name,
@@ -986,7 +1002,7 @@ async def move_document(
 async def fetch_url(
     url: str = Body(..., embed=True),
     kb_id: str | None = Body(None, embed=True),
-    current_user: User = Depends(get_admin_user),
+    current_user: User = Depends(get_required_user),
 ):
     """抓取 URL 内容并上传到 MinIO。"""
     logger.debug("Fetching URL for kb_id {}", kb_id)
@@ -1020,7 +1036,7 @@ async def fetch_url(
 @knowledge.post("/files/import-workspace")
 async def import_workspace_files(
     payload: WorkspaceImportRequest,
-    current_user: User = Depends(get_admin_user),
+    current_user: User = Depends(get_required_user),
 ):
     """将当前用户工作区文件导入 MinIO，返回与普通文件上传一致的预处理结果。"""
     kb_id = payload.kb_id.strip()
@@ -1051,7 +1067,7 @@ async def import_workspace_files(
 async def upload_file(
     file: UploadFile = File(...),
     kb_id: str | None = Query(None),
-    current_user: User = Depends(get_admin_user),
+    current_user: User = Depends(get_required_user),
 ):
     """上传文件"""
     if not file.filename:
@@ -1085,7 +1101,7 @@ async def upload_file(
 
 
 @knowledge.get("/files/supported-types")
-async def get_supported_file_types(current_user: User = Depends(get_admin_user)):
+async def get_supported_file_types(current_user: User = Depends(get_required_user)):
     """获取当前支持的文件类型"""
     return {"message": "success", "file_types": sorted(SUPPORTED_FILE_EXTENSIONS)}
 
@@ -1094,7 +1110,7 @@ async def get_supported_file_types(current_user: User = Depends(get_admin_user))
 
 
 @knowledge.get("/types")
-async def get_knowledge_base_types(current_user: User = Depends(get_admin_user)):
+async def get_knowledge_base_types(current_user: User = Depends(get_required_user)):
     """获取支持的知识库类型"""
     try:
         kb_types = knowledge_base_manager.get_supported_kb_types()
@@ -1107,7 +1123,7 @@ async def get_knowledge_base_types(current_user: User = Depends(get_admin_user))
 
 
 @knowledge.get("/chunk-presets")
-async def get_knowledge_chunk_presets(current_user: User = Depends(get_admin_user)):
+async def get_knowledge_chunk_presets(current_user: User = Depends(get_required_user)):
     """获取支持的知识库分块策略"""
     return {"chunk_presets": get_chunk_preset_options(), "message": "success"}
 
@@ -1133,7 +1149,7 @@ async def generate_description(
     name: str = Body(..., description="知识库名称"),
     current_description: str = Body("", description="当前描述（可选，用于优化）"),
     file_list: list[str] | None = Body(None, description="文件列表"),
-    current_user: User = Depends(get_admin_user),
+    current_user: User = Depends(get_required_user),
 ):
     """使用 LLM 生成或优化知识库描述
 

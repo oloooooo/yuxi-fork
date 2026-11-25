@@ -2,7 +2,7 @@
 
 from fastapi import Depends, HTTPException
 
-from yuxi.api.dependencies.auth import get_admin_user
+from yuxi.api.dependencies.auth import get_admin_user, get_required_user
 from yuxi.modules.identity.models import User
 from yuxi.modules.identity.permissions import (
     ResourcePermission,
@@ -33,9 +33,19 @@ async def ensure_knowledge_base_permission(
 
 async def require_knowledge_base_read(
     kb_id: str,
+    current_user: User = Depends(get_required_user),
+) -> User:
+    """校验当前用户对指定知识库的读取权限。"""
+
+    await ensure_knowledge_base_permission(kb_id, current_user, ResourcePermission.READ)
+    return current_user
+
+
+async def require_knowledge_base_admin_read(
+    kb_id: str,
     current_user: User = Depends(get_admin_user),
 ) -> User:
-    """校验管理员对指定知识库的读取权限。"""
+    """评估等平台级功能仍需管理员，同时校验知识库读取权限。"""
 
     await ensure_knowledge_base_permission(kb_id, current_user, ResourcePermission.READ)
     return current_user
@@ -43,9 +53,9 @@ async def require_knowledge_base_read(
 
 async def require_knowledge_base_manage(
     kb_id: str,
-    current_user: User = Depends(get_admin_user),
+    current_user: User = Depends(get_required_user),
 ) -> User:
-    """校验管理员对指定知识库的管理权限。"""
+    """校验当前用户对指定知识库的管理权限。"""
 
     await ensure_knowledge_base_permission(kb_id, current_user, ResourcePermission.MANAGE)
     return current_user
