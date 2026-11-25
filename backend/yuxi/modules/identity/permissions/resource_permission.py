@@ -126,8 +126,9 @@ def normalize_permission_config(
     allowed_access_levels: Collection[str] | None = None,
     unauthorized_access_level_message: str = "当前用户无权使用该资源共享范围",
     strict: bool = False,
+    owner_department_id: int | None = None,
 ) -> dict:
-    """规范化并校验 v2 共享配置。"""
+    """规范化并校验 v2 共享配置；`owner_department_id` 记录归属部门，供部门管理员持续管理。"""
 
     config = share_config if isinstance(share_config, dict) else {}
     if config.get("version") == 2:
@@ -144,6 +145,9 @@ def normalize_permission_config(
             "read_scope": read_scope,
             "manage_scope": manage_scope,
         }
+        owner = owner_department_id if owner_department_id is not None else config.get("owner_department_id")
+        if owner is not None:
+            normalized["owner_department_id"] = int(owner)
         if allowed_access_levels is not None:
             for scope in (normalized["read_scope"], normalized["manage_scope"]):
                 if scope and scope["access_level"] not in allowed_access_levels:
@@ -196,6 +200,27 @@ def _administers_department(user: Any, read_scope: dict[str, Any] | None) -> boo
     return str(department_id) in {str(item) for item in read_scope.get("department_ids") or []}
 
 
+def _owns_department(config: dict[str, Any], user: Any) -> bool:
+    """判断资源的归属部门是否就是该管理员的部门。"""
+
+    owner_department_id = config.get("owner_department_id")
+    department_id = _value(user, "department_id")
+    if owner_department_id is None or department_id is None:
+        return False
+    return str(owner_department_id) == str(department_id)
+
+
+def stamp_owner_department(share_config: dict, user: Any, previous: dict | None = None) -> dict:
+    """写入归属部门：管理员创建的资源归其部门，后续改范围仍由该部门管理。"""
+
+    owner = (previous or {}).get("owner_department_id") or share_config.get("owner_department_id")
+    if owner is None and _value(user, "role") == "admin":
+        owner = _value(user, "department_id")
+    if owner is None:
+        return share_config
+    return {**share_config, "owner_department_id": int(owner)}
+
+
 def resolve_resource_permission(
     user: Any,
     resource: ShareableResource,
@@ -232,8 +257,10 @@ def resolve_resource_permission(
         granted = ResourcePermission.READ
     else:
         granted = ResourcePermission.NONE
-    if _value(user, "role") == "admin" and _administers_department(user, config["read_scope"]):
-        # 部门管理员治理本部门共享的资源；全平台资源仍按读取范围处理。
+    if _value(user, "role") == "admin" and (
+        _administers_department(user, config["read_scope"]) or _owns_department(config, user)
+    ):
+        # 部门管理员治理本部门共享且归属本部门的资源；全平台资源仍按读取范围处理。
         granted = ResourcePermission.MANAGE
 
     ceiling = policy.role_ceiling.get(_value(user, "role"), ResourcePermission.READ)

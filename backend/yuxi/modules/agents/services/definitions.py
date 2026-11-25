@@ -19,7 +19,7 @@ from yuxi.modules.extensions.skills.package import parse_skill_dir_metadata
 from yuxi.modules.extensions.skills.projection import invalidate_skill_projections, refresh_committed_skill_projections
 from yuxi.modules.extensions.skills.repository import SkillRepository
 from yuxi.modules.identity.models import User
-from yuxi.modules.identity.permissions import normalize_permission_config, resolve_agent_permission
+from yuxi.modules.identity.permissions import normalize_permission_config, resolve_agent_permission, stamp_owner_department
 from yuxi.modules.identity.permissions.resource_permission import ADMIN_ROLES
 from yuxi.modules.agents.permissions import allowed_agent_access_levels, default_agent_share_config
 from yuxi.modules.identity.repositories.resource_grants import validate_shared_grants
@@ -58,10 +58,13 @@ async def create_agent_definition(db, *, operator, skill_upload=None, **fields):
             user=operator,
         )
         if fields.get("visibility", "private") == "shared":
-            fields["share_config"] = await validate_shared_grants(
-                db,
-                fields.get("share_config") or default_agent_share_config(operator),
-                allowed_access_levels=set(allowed_agent_access_levels(operator)),
+            fields["share_config"] = stamp_owner_department(
+                await validate_shared_grants(
+                    db,
+                    fields.get("share_config") or default_agent_share_config(operator),
+                    allowed_access_levels=set(allowed_agent_access_levels(operator)),
+                ),
+                operator,
             )
         agent = await AgentRepository(db).create(
             **fields,
@@ -133,8 +136,12 @@ async def update_agent_definition(db, agent, **kwargs):
                 agent.config_json, config, resource_access=access, context_schema=backend.context_schema
             )
         if share_config is not None:
-            kwargs["share_config"] = await validate_shared_grants(
-                db, share_config, allowed_access_levels=set(allowed_agent_access_levels(operator))
+            kwargs["share_config"] = stamp_owner_department(
+                await validate_shared_grants(
+                    db, share_config, allowed_access_levels=set(allowed_agent_access_levels(operator))
+                ),
+                operator,
+                previous=agent.share_config,
             )
         agent = await repo.update_record(agent, **kwargs)
         await commit_agent_definition(db, agent, operator, refresh_binding=share_config is not None or kwargs.get("visibility") is not None)

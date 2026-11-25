@@ -234,3 +234,58 @@ async def test_department_admin_edits_non_sensitive_fields_and_resets_auth_only(
         await test_client.delete(f"/api/auth/users/{peer_uid}", headers=admin_headers)
         await delete_department_by_id(test_client, admin_headers, department_id)
         await delete_department_by_id(test_client, admin_headers, other_department["id"])
+
+
+async def test_department_admin_can_assign_department_connector_to_specific_user(test_client, admin_headers):
+    """部门管理员可把本部门连接器分配给指定用户，并继续保留管理权。"""
+    suffix = uuid.uuid4().hex[:6]
+    department, dept_admin_headers = await _create_department_with_admin(
+        test_client, admin_headers, f"it-dept-assign-{suffix}"
+    )
+    department_id = department["id"]
+    slug = f"it-dept-assign-{suffix}"
+    try:
+        created = await _create_connector(
+            test_client, admin_headers, slug, _share("department", department_ids=[department_id])
+        )
+        assert created.status_code == 200, created.text
+
+        target = await test_client.post(
+            "/api/auth/users",
+            headers=admin_headers,
+            json={"username": f"assignee_{suffix}", "password": "Pw!assign1234", "role": "user"},
+        )
+        assert target.status_code == 200, target.text
+        target_uid = target.json()["uid"]
+
+        # 部门管理员把部门共享改成指定人（可以不是本部门的人），保存后仍然可以管理。
+        to_user = await test_client.put(
+            f"/api/system/mcp-servers/{slug}/share-config",
+            headers=dept_admin_headers,
+            json={"share_config": _share("user", user_uids=[target_uid])},
+        )
+        assert to_user.status_code == 200, to_user.text
+        scope = to_user.json()["data"]["share_config"]
+        assert scope["read_scope"]["user_uids"] == [target_uid]
+        assert scope["owner_department_id"] == department_id
+
+        detail = await _read_connector(test_client, dept_admin_headers, slug)
+        assert detail["can_manage"] is True
+
+        # 目标用户能看到这个连接器。
+        target_headers = await _login(test_client, target_uid, "Pw!assign1234")
+        visible = await test_client.get(f"/api/system/mcp-servers/{slug}", headers=target_headers)
+        assert visible.status_code == 200, visible.text
+
+        # 仍可以改回部门范围。
+        back = await test_client.put(
+            f"/api/system/mcp-servers/{slug}/share-config",
+            headers=dept_admin_headers,
+            json={"share_config": _share("department", department_ids=[department_id])},
+        )
+        assert back.status_code == 200, back.text
+        assert back.json()["data"]["share_config"]["owner_department_id"] == department_id
+    finally:
+        await test_client.delete(f"/api/system/mcp-servers/{slug}", headers=admin_headers)
+        await test_client.delete(f"/api/auth/users/{target_uid}", headers=admin_headers)
+        await delete_department_by_id(test_client, admin_headers, department_id)

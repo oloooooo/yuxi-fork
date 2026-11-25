@@ -270,3 +270,21 @@ def test_builtin_skill_permission_respects_role_ceiling_and_deleted_identity(rol
     resource.source_type = "builtin"
     assert resolve_skill_permission(user, resource) == expected
     assert user_can_manage_skill(user, resource) == (expected == ResourcePermission.MANAGE)
+
+
+def test_department_admin_keeps_manage_after_switching_to_user_scope():
+    """部门管理员把资源分配给个人后，仍按归属部门保留管理权。"""
+    resource = _resource(
+        created_by="owner-admin",
+        share_config={
+            "version": 2,
+            "read_scope": {"access_level": "user", "user_uids": ["someone"]},
+            "manage_scope": None,
+            "owner_department_id": 7,
+        },
+    )
+
+    admin = _user(uid="owner-admin", role="admin", department_id=7)
+    other_admin = _user(uid="other-admin", role="admin", department_id=8)
+    assert resolve_agent_permission(admin, resource) == ResourcePermission.MANAGE
+    assert resolve_agent_permission(other_admin, resource) == ResourcePermission.NONE

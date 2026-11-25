@@ -344,7 +344,8 @@ async def test_share_private_agent_updates_same_definition(role, owner, share_co
     assert updated is agent
     assert (agent.id, agent.slug, agent.created_by, agent.visibility) == (1, "shared-bot", owner, "shared")
     assert agent.config_json == {"context": {"system_prompt": "original", "skills": ["existing"]}}
-    assert agent.share_config == share_config
+    assert agent.share_config["read_scope"] == share_config["read_scope"]
+    assert agent.share_config["manage_scope"] == share_config["manage_scope"]
 
 
 @pytest.mark.asyncio

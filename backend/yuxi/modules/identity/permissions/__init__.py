@@ -17,6 +17,7 @@ from yuxi.modules.identity.permissions.resource_permission import (
     resolve_resource_permission,
     resolve_skill_permission,
     scope_matches,
+    stamp_owner_department,
 )
 
 __all__ = [
@@ -36,4 +37,5 @@ __all__ = [
     "resolve_resource_permission",
     "resolve_skill_permission",
     "scope_matches",
+    "stamp_owner_department",
 ]

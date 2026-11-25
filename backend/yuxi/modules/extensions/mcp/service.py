@@ -31,6 +31,7 @@ from yuxi.modules.identity.permissions import (
     ResourcePermission,
     normalize_permission_config,
     resolve_mcp_permission,
+    stamp_owner_department,
 )
 
 BUILTIN_MCP_SERVERS = BUILTIN_MCP_MANIFEST["mcpServers"]
@@ -75,14 +76,15 @@ def default_mcp_share_config(user) -> dict:
     department_id = getattr(user, "department_id", None)
     if role == "superadmin":
         scope = {"access_level": "global", "department_ids": [], "user_uids": []}
-    elif role == "admin" and department_id is not None:
+        return {"version": 2, "read_scope": scope, "manage_scope": None}
+    if role == "admin" and department_id is not None:
         scope = {"access_level": "department", "department_ids": [department_id], "user_uids": []}
-    else:
-        scope = {"access_level": "user", "department_ids": [], "user_uids": [user.uid]}
+        return {"version": 2, "read_scope": scope, "manage_scope": None, "owner_department_id": int(department_id)}
+    scope = {"access_level": "user", "department_ids": [], "user_uids": [user.uid]}
     return {"version": 2, "read_scope": scope, "manage_scope": None}
 
 
-def normalize_mcp_share_config(share_config: dict | None, *, operator) -> dict:
+def normalize_mcp_share_config(share_config: dict | None, *, operator, previous: dict | None = None) -> dict:
     """校验并标准化连接器共享范围，越权范围显式失败。"""
     normalized = normalize_permission_config(
         share_config or default_mcp_share_config(operator),
@@ -92,7 +94,7 @@ def normalize_mcp_share_config(share_config: dict | None, *, operator) -> dict:
     )
     # 连接器没有「管理范围」语义，统一丢弃，避免写入永不生效的配置。
     normalized["manage_scope"] = None
-    return normalized
+    return stamp_owner_department(normalized, operator, previous=previous)
 
 
 def mcp_server_visible(user, server: MCPServer, *, granted: bool = False) -> bool:
@@ -301,7 +303,7 @@ async def update_mcp_share_config(db: AsyncSession, slug: str, share_config: dic
         raise PermissionError("系统内置连接器的共享范围由代码管理")
     if resolve_mcp_permission(operator, server) != ResourcePermission.MANAGE:
         raise PermissionError("仅管理员可修改连接器共享范围")
-    normalized = normalize_mcp_share_config(share_config, operator=operator)
+    normalized = normalize_mcp_share_config(share_config, operator=operator, previous=server.share_config)
     server.share_config = normalized
     server.updated_by = operator.username
     await db.commit()

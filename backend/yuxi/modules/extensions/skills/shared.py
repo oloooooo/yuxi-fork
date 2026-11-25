@@ -74,7 +74,7 @@ from yuxi.modules.extensions.skills.projection import (
 )
 from yuxi.modules.extensions.skills.repository import SkillRepository
 from yuxi.modules.identity.models import User
-from yuxi.modules.identity.permissions.resource_permission import ADMIN_ROLES
+from yuxi.modules.identity.permissions.resource_permission import ADMIN_ROLES, stamp_owner_department
 from yuxi.modules.identity.repositories.resource_grants import validate_shared_grants
 
 logger = logging.getLogger(__name__)
@@ -119,6 +119,7 @@ async def confirm_skill_install_draft(
         source_type=source_type,
         allowed_access_levels=set(get_allowed_skill_access_levels(operator)),
     )
+    normalized_share_config = stamp_owner_department(normalized_share_config, operator)
 
     repo = SkillRepository(db)
 
@@ -253,6 +254,7 @@ async def update_skill_share_config(
         source_type=item.source_type,
         allowed_access_levels=set(get_allowed_skill_access_levels(operator)),
     )
+    normalized = stamp_owner_department(normalized, operator, previous=item.share_config)
     repo = SkillRepository(db)
     normalized = await validate_shared_grants(db, normalized)
     updated = await repo.update_share_config(item, share_config=normalized, updated_by=operator.uid)
