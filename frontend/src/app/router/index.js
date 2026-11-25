@@ -109,6 +109,19 @@ const router = createRouter({
       ]
     },
     {
+      path: '/marketplace',
+      name: 'marketplace',
+      component: AppLayout,
+      children: [
+        {
+          path: '',
+          name: 'MarketplaceComp',
+          component: () => import('../../pages/MarketplaceView.vue'),
+          meta: { keepAlive: false, requiresAuth: true }
+        }
+      ]
+    },
+    {
       path: '/extensions',
       name: 'extensions',
       component: AppLayout,

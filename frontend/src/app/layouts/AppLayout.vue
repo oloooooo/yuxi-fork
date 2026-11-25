@@ -13,6 +13,7 @@ import {
   MessageCircle,
   SquarePen,
   Search,
+  Store,
 } from '@lucide/vue'
 
 import { healthApi } from '@/apis/system_api'
@@ -173,6 +174,13 @@ const mainList = computed(() => {
     path: '/workspace',
     icon: HardDrive,
     activeIcon: HardDrive
+  })
+
+  items.push({
+    name: '资源市场',
+    path: '/marketplace',
+    icon: Store,
+    activeIcon: Store
   })
 
   items.push({
