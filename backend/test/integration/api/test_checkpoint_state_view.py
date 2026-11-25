@@ -58,6 +58,7 @@ async def test_state_view_reads_postgres_snapshot_and_rejects_other_users(test_c
             assert len(state.pop("cooperation")["sessions"]) == 1
             assert state == {
                 "artifacts": [],
+                "warnings": [],
                 "token_usage": None,
             }
 
@@ -79,7 +80,7 @@ async def test_state_view_reads_postgres_snapshot_and_rejects_other_users(test_c
             assert response.status_code == 200, response.text
             state = response.json()["agent_state"]
             assert [member["session_id"] for member in state.pop("cooperation")["sessions"]] == [thread_id]
-            assert state == {key: payload[key] for key in ("artifacts", "token_usage")}
+            assert state == {**{key: payload[key] for key in ("artifacts", "token_usage")}, "warnings": []}
             assert "items" not in response.json()  # 可见消息来自持久Message，不能从checkpoint伪造。
             assert "interrupt" not in response.json()
             assert (await test_client.get(url)).status_code == 401

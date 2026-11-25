@@ -41,6 +41,7 @@ cache
 .playwright
 .playwright-cli
 .playwright-mcp
+test-results
 .opencode
 
 
