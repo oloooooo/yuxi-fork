@@ -86,10 +86,29 @@ def serialize(row: ResourceSubscription) -> dict[str, Any]:
     }
 
 
+async def _reconcile_access(db: AsyncSession, user: User, items: list[ResourceSubscription]) -> None:
+    """角色或共享范围变化后，申请人已直接获得权限的待审批记录转为已批准。"""
+    changed = False
+    for item in items:
+        if item.status != "pending" or item.resource_type == KNOWLEDGE_CREATE_TYPE:
+            continue
+        row = await _resource_row(db, item.resource_type, item.resource_slug)
+        if row is None or _current_permission(user, row) == ResourcePermission.NONE:
+            continue
+        item.status = "approved"
+        item.decided_at = utc_now()
+        item.decided_by = "system:reconcile"
+        changed = True
+    if changed:
+        await db.commit()
+
+
 async def list_catalog(db: AsyncSession, user: User) -> list[dict[str, Any]]:
     """列出全部可申请资源（只含名称与描述），并标注当前用户的可见性与申请状态。"""
     repo = SubscriptionRepository(db)
-    mine = {row.resource_slug: row for row in await repo.list_mine(user.id)}
+    items = await repo.list_mine(user.id)
+    await _reconcile_access(db, user, items)
+    mine = {row.resource_slug: row for row in items}
     rows: list[tuple[str, Agent | Skill | MCPServer]] = []
     for agent in await db.scalars(select(Agent).order_by(Agent.id.asc())):
         rows.append(("agent", agent))
@@ -210,6 +229,7 @@ async def has_knowledge_create_grant(db: AsyncSession, user: User) -> bool:
 async def list_mine(db: AsyncSession, user: User) -> list[dict[str, Any]]:
     """当前用户的申请记录，附带资源展示名。"""
     items = await SubscriptionRepository(db).list_mine(user.id)
+    await _reconcile_access(db, user, items)
     result = []
     for item in items:
         data = serialize(item)
@@ -263,9 +283,9 @@ async def pending_count(db: AsyncSession, operator: User) -> int:
 async def decide(db: AsyncSession, subscription_id: int, operator: User, *, approve: bool) -> dict[str, Any]:
     """审批单条申请；已处理的记录不重复改变结果。"""
     repo = SubscriptionRepository(db)
-    item = await repo.get(subscription_id)
+    item = await repo.get(subscription_id, for_update=True)
     if item is None:
-        raise SubscriptionError("申请不存在", status_code=404)
+        raise SubscriptionError("申请已被申请人撤回或删除", status_code=404)
     if item.status != "pending":
         raise SubscriptionError("该申请已处理", status_code=409)
     if item.user_id == operator.id:
@@ -288,9 +308,9 @@ async def decide(db: AsyncSession, subscription_id: int, operator: User, *, appr
 async def revoke(db: AsyncSession, subscription_id: int, *, operator: User) -> None:
     """撤销订阅，用户下一次请求即失去读取权限；申请人只能撤销自己的记录。"""
     repo = SubscriptionRepository(db)
-    item = await repo.get(subscription_id)
+    item = await repo.get(subscription_id, for_update=True)
     if item is None:
-        raise SubscriptionError("申请不存在", status_code=404)
+        raise SubscriptionError("申请不存在或已被处理", status_code=404)
     if operator.role not in ADMIN_ROLES and item.user_id != operator.id:
         raise SubscriptionError("无权撤销他人的申请", status_code=403)
     await repo.delete(item)

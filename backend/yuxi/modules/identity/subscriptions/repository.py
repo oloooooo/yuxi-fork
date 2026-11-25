@@ -23,9 +23,14 @@ class SubscriptionRepository:
         )
         return result.scalar_one_or_none()
 
-    async def get(self, subscription_id: int) -> ResourceSubscription | None:
-        """按主键读取，可跨用户（审批场景）。"""
-        return await self.db.get(ResourceSubscription, subscription_id)
+    async def get(self, subscription_id: int, *, for_update: bool = False) -> ResourceSubscription | None:
+        """按主键读取，可跨用户；审批与撤回在同一行锁内判定状态。"""
+        if not for_update:
+            return await self.db.get(ResourceSubscription, subscription_id)
+        result = await self.db.execute(
+            select(ResourceSubscription).where(ResourceSubscription.id == subscription_id).with_for_update()
+        )
+        return result.scalar_one_or_none()
 
     async def list_mine(self, user_id: int) -> list[ResourceSubscription]:
         """申请人自己的全部记录，按时间倒序。"""

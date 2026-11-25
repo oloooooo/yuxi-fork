@@ -222,3 +222,57 @@ async def test_agent_subscription_grants_read_access(test_client, admin_headers)
     finally:
         await test_client.delete(f"/api/agent/{slug}", headers=admin_headers)
         await delete_user_by_id(test_client, admin_headers, user["user"]["id"])
+
+
+async def test_approve_after_applicant_withdraws_returns_404(test_client, admin_headers):
+    """申请人撤回后管理员再审批：明确返回 404，不会把已删除的申请改成已批准。"""
+    applicant = await _create_user(test_client, admin_headers)
+    slug = f"it-sub-withdraw-{uuid.uuid4().hex[:6]}"
+    await _create_connector(
+        test_client, admin_headers, slug, {"access_level": "user", "user_uids": ["someone-else"]}
+    )
+    try:
+        submitted = await _submit(test_client, applicant["headers"], "mcp", slug)
+        subscription_id = submitted["id"]
+
+        withdrawn = await test_client.delete(f"/api/subscriptions/{subscription_id}", headers=applicant["headers"])
+        assert withdrawn.status_code == 200, withdrawn.text
+
+        approve = await test_client.post(f"/api/subscriptions/{subscription_id}/approve", headers=admin_headers)
+        assert approve.status_code == 404, approve.text
+        assert "撤回" in approve.json()["detail"]
+    finally:
+        await test_client.delete(f"/api/system/mcp-servers/{slug}", headers=admin_headers)
+        await test_client.delete(f"/api/auth/users/{applicant['user']['id']}", headers=admin_headers)
+
+
+async def test_pending_request_auto_approves_after_scope_expands(test_client, admin_headers):
+    """管理员直接把申请人纳入共享范围后，待审批申请自动转已批准，不再卡住。"""
+    applicant = await _create_user(test_client, admin_headers)
+    slug = f"it-sub-auto-{uuid.uuid4().hex[:6]}"
+    await _create_connector(
+        test_client, admin_headers, slug, {"access_level": "user", "user_uids": ["someone-else"]}
+    )
+    try:
+        submitted = await _submit(test_client, applicant["headers"], "mcp", slug)
+        assert submitted["status"] == "pending"
+
+        expand = await test_client.put(
+            f"/api/system/mcp-servers/{slug}/share-config",
+            headers=admin_headers,
+            json={"share_config": _share("user", user_uids=[applicant["user"]["uid"]])},
+        )
+        assert expand.status_code == 200, expand.text
+
+        catalog = await test_client.get("/api/subscriptions/catalog", headers=applicant["headers"])
+        row = next(item for item in catalog.json()["data"] if item["resource_slug"] == slug)
+        assert row["status"] == "approved"
+        assert row["visible"] is True
+
+        mine = await test_client.get("/api/subscriptions/mine", headers=applicant["headers"])
+        record = next(item for item in mine.json()["data"] if item["resource_slug"] == slug)
+        assert record["status"] == "approved"
+        assert record["decided_by"] == "system:reconcile"
+    finally:
+        await test_client.delete(f"/api/system/mcp-servers/{slug}", headers=admin_headers)
+        await test_client.delete(f"/api/auth/users/{applicant['user']['id']}", headers=admin_headers)
